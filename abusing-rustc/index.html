@@ -912,65 +912,65 @@ where
 #[no_mangle]
 <span style="color: #f40064">pub</span> <span style="color: #008c99">fn</span> <span style="color: #0057d1">cowarr_as_ref</span>&lt;<span style="color: #f40064">'a</span>>(<span style="color: #a018ff">a</span>: <span style="color: #a018ff">&amp;</span><span style="color: #f40064">'a</span> CowArr&lt;'<span style="color: #a018ff">_</span>, <span style="color: #008c99">u8</span>>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #a018ff">&amp;</span><span style="color: #f40064">'a</span><span style="color: #a018ff"> </span>[<span style="color: #008c99">u8</span>] {
     a<span style="color: #f40064">.</span><span style="color: #0057d1">as_ref</span>()
-}</code></pre></div><p>Clicking “Show Assembly” (in release mode, of course) shows us what this compiles to. Don’t worry, I know assembly can be scary so I’ve written comments:</p><div class="code-dark"><pre><code data-lang="gas">;; For the standard library `Cow`...
+}</code></pre></div><p>Clicking “Show Assembly” (in release mode, of course) shows us what this compiles to. Don’t worry, I know assembly can be scary so I’ve written comments:</p><div class="code-dark"><pre><code data-lang="asm"><span style="color: #7b8496">;</span><span style="color: #7b8496">; For the standard library `Cow`...</span>
 cow_as_ref:
-    ;; We only need to load the `ptr` once (good!)
-    mov   rax, [rdi + 8]
-    ;; Unfortunately, we check the tag to load the length
-    cmp   [rdi], 1
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We only need to load the `ptr` once (good!)</span>
+    <span style="color: #bd5eff">mov</span>   rax, [rdi <span style="color: #bd5eff">+</span> 8]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; Unfortunately, we check the tag to load the length</span>
+    <span style="color: #bd5eff">cmp</span>   [rdi], 1
 
-    ;; This is a pointer to the length if we have a borrowed slice
-    lea   rcx, [rdi + 16]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; This is a pointer to the length if we have a borrowed slice</span>
+    <span style="color: #bd5eff">lea</span>   rcx, [rdi <span style="color: #bd5eff">+</span> 16]
 
-    ;; This is a pointer to the length if we have an owned vector
-    lea   rdx, [rdi + 24]
-    ;; We use `cmov`, which will overwrite the pointer to the borrowed
-    ;; slice's length with the pointer to the owned vector's length if
-    ;; our `Cow`'s tag shows that it is owned.
-    cmove rcx, rdx
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; This is a pointer to the length if we have an owned vector</span>
+    <span style="color: #bd5eff">lea</span>   rdx, [rdi <span style="color: #bd5eff">+</span> 24]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We use `cmov`, which will overwrite the pointer to the borrowed</span>
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; slice's length with the pointer to the owned vector's length if</span>
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; our `Cow`'s tag shows that it is owned.</span>
+    <span style="color: #bd5eff">cmove</span> rcx, rdx
 
-    ;; Then finally, we dereference this pointer-to-length to get the
-    ;; actual length
-    mov   rdx, [rcx]
-    ret
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; Then finally, we dereference this pointer-to-length to get the</span>
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; actual length</span>
+    <span style="color: #bd5eff">mov</span>   rdx, [rcx]
+    <span style="color: #bd5eff">ret</span>
 
-;; For our `CowArr`
+<span style="color: #7b8496">;</span><span style="color: #7b8496">; For our `CowArr`</span>
 cowarr_as_ref:
-    ;; We return the `ptr`
-    mov rax, [rdi]
-    ;; We return the `len`
-    mov rdx, [rdi + 8]
-    ;; That's it! We're done
-    ret</code></pre></div><div class="code-light"><pre><code data-lang="gas">;; For the standard library `Cow`...
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We return the `ptr`</span>
+    <span style="color: #bd5eff">mov</span> rax, [rdi]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We return the `len`</span>
+    <span style="color: #bd5eff">mov</span> rdx, [rdi <span style="color: #bd5eff">+</span> 8]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; That's it! We're done</span>
+    <span style="color: #bd5eff">ret</span></code></pre></div><div class="code-light"><pre><code data-lang="asm"><span style="color: #7b8496">;</span><span style="color: #7b8496">; For the standard library `Cow`...</span>
 cow_as_ref:
-    ;; We only need to load the `ptr` once (good!)
-    mov   rax, [rdi + 8]
-    ;; Unfortunately, we check the tag to load the length
-    cmp   [rdi], 1
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We only need to load the `ptr` once (good!)</span>
+    <span style="color: #a018ff">mov</span>   rax, [rdi <span style="color: #a018ff">+</span> 8]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; Unfortunately, we check the tag to load the length</span>
+    <span style="color: #a018ff">cmp</span>   [rdi], 1
 
-    ;; This is a pointer to the length if we have a borrowed slice
-    lea   rcx, [rdi + 16]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; This is a pointer to the length if we have a borrowed slice</span>
+    <span style="color: #a018ff">lea</span>   rcx, [rdi <span style="color: #a018ff">+</span> 16]
 
-    ;; This is a pointer to the length if we have an owned vector
-    lea   rdx, [rdi + 24]
-    ;; We use `cmov`, which will overwrite the pointer to the borrowed
-    ;; slice's length with the pointer to the owned vector's length if
-    ;; our `Cow`'s tag shows that it is owned.
-    cmove rcx, rdx
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; This is a pointer to the length if we have an owned vector</span>
+    <span style="color: #a018ff">lea</span>   rdx, [rdi <span style="color: #a018ff">+</span> 24]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We use `cmov`, which will overwrite the pointer to the borrowed</span>
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; slice's length with the pointer to the owned vector's length if</span>
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; our `Cow`'s tag shows that it is owned.</span>
+    <span style="color: #a018ff">cmove</span> rcx, rdx
 
-    ;; Then finally, we dereference this pointer-to-length to get the
-    ;; actual length
-    mov   rdx, [rcx]
-    ret
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; Then finally, we dereference this pointer-to-length to get the</span>
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; actual length</span>
+    <span style="color: #a018ff">mov</span>   rdx, [rcx]
+    <span style="color: #a018ff">ret</span>
 
-;; For our `CowArr`
+<span style="color: #7b8496">;</span><span style="color: #7b8496">; For our `CowArr`</span>
 cowarr_as_ref:
-    ;; We return the `ptr`
-    mov rax, [rdi]
-    ;; We return the `len`
-    mov rdx, [rdi + 8]
-    ;; That's it! We're done
-    ret</code></pre></div><p>Even if you don’t understand assembly, you can see that this is an improvement by the reduction in instruction count, if nothing else. It also reduces register pressure, although if you don’t know what that means then don’t worry - its effect is small enough that you don’t need to worry about it for now.</p><p>If you know anything about calling conventions, you might notice something a bit odd about that assembly code. We’ll get to it in due time, although not until after we pass through into the Forbidden Realms.</p><h2 id="inviting-god-s-wrath-with-cursed-rust-act-2-stepping-into-the-forbidden-realms"><span class="section-title">Act 2: Stepping into the Forbidden Realms</span> <span class="section-link-postfix"><a href="#inviting-god-s-wrath-with-cursed-rust-act-2-stepping-into-the-forbidden-realms">§</a></span></h2><p>So far, so simple. But we can do better, if we’re willing to add some restrictions. We can’t reduce the size of <code>ptr</code> since it’s not really possible to safely make many assumptions about the range of values a pointer can take, but the same can’t be said for <code>len</code> and <code>cap</code>. If we’re on a 64-bit system, using a 64-bit length and capacity allows us to store up to 18,446,744,073,709,551,615 elements, which I think we can agree that it’s unlikely for a single array to contain this many items in the majority of programs. In fact, it’s not even possible to create an array this large for anything other than u8 and other single-byte (or even smaller) types, since you’ll run out of address space long before that, not even mentioning that you’ll run out of memory on your computer long before you run out of address space. So let’s say that <code>len</code> and <code>cap</code> are both 32-bit on 64-bit systems. We’ll ignore 32-bit for now, on 32-bit systems we could choose to either make both <code>len</code> and <code>cap</code> 16-bit, or fall back to the implementation in the previous section. This choice isn’t really important for now, so I’ll focus on 64-bit. With 32-bit <code>len</code> and <code>cap</code> we can store arrays with up to 4,294,967,295 elements, which means, for example, that a single string can be up to 4Gb long. This is a restriction, certainly, it’s not unbelievable that your program would want to process larger strings, but the standard library Cow will always support that if you need it. If you don’t need that many elements, then this gives you a size reduction.</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ffbd5e">use</span> <span style="color: #5ef1ff">std</span><span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>NonNull;
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We return the `ptr`</span>
+    <span style="color: #a018ff">mov</span> rax, [rdi]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; We return the `len`</span>
+    <span style="color: #a018ff">mov</span> rdx, [rdi <span style="color: #a018ff">+</span> 8]
+    <span style="color: #7b8496">;</span><span style="color: #7b8496">; That's it! We're done</span>
+    <span style="color: #a018ff">ret</span></code></pre></div><p>Even if you don’t understand assembly, you can see that this is an improvement by the reduction in instruction count, if nothing else. It also reduces register pressure, although if you don’t know what that means then don’t worry - its effect is small enough that you don’t need to worry about it for now.</p><p>If you know anything about calling conventions, you might notice something a bit odd about that assembly code. We’ll get to it in due time, although not until after we pass through into the Forbidden Realms.</p><h2 id="inviting-god-s-wrath-with-cursed-rust-act-2-stepping-into-the-forbidden-realms"><span class="section-title">Act 2: Stepping into the Forbidden Realms</span> <span class="section-link-postfix"><a href="#inviting-god-s-wrath-with-cursed-rust-act-2-stepping-into-the-forbidden-realms">§</a></span></h2><p>So far, so simple. But we can do better, if we’re willing to add some restrictions. We can’t reduce the size of <code>ptr</code> since it’s not really possible to safely make many assumptions about the range of values a pointer can take, but the same can’t be said for <code>len</code> and <code>cap</code>. If we’re on a 64-bit system, using a 64-bit length and capacity allows us to store up to 18,446,744,073,709,551,615 elements, which I think we can agree that it’s unlikely for a single array to contain this many items in the majority of programs. In fact, it’s not even possible to create an array this large for anything other than u8 and other single-byte (or even smaller) types, since you’ll run out of address space long before that, not even mentioning that you’ll run out of memory on your computer long before you run out of address space. So let’s say that <code>len</code> and <code>cap</code> are both 32-bit on 64-bit systems. We’ll ignore 32-bit for now, on 32-bit systems we could choose to either make both <code>len</code> and <code>cap</code> 16-bit, or fall back to the implementation in the previous section. This choice isn’t really important for now, so I’ll focus on 64-bit. With 32-bit <code>len</code> and <code>cap</code> we can store arrays with up to 4,294,967,295 elements, which means, for example, that a single string can be up to 4Gb long. This is a restriction, certainly, it’s not unbelievable that your program would want to process larger strings, but the standard library Cow will always support that if you need it. If you don’t need that many elements, then this gives you a size reduction.</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ffbd5e">use</span> <span style="color: #5ef1ff">std</span><span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>NonNull;
 
 <span style="color: #5ef1ff">struct</span> CowArr&lt;<span style="color: #ff5ea0">'a</span>, T> {
     ptr: NonNull&lt;T>,
@@ -1104,79 +1104,79 @@ cowarr_as_ref:
 #[no_mangle]
 <span style="color: #f40064">pub</span> <span style="color: #008c99">fn</span> <span style="color: #0057d1">cowarr3fields_noop</span>(<span style="color: #a018ff">a</span>: CowArr3Fields&lt;'<span style="color: #a018ff">_</span>, <span style="color: #008c99">u8</span>>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #a018ff">CowArr3Fields</span><span style="color: #a018ff">&lt;</span><span style="color: #a018ff">'</span><span style="color: #a018ff">_</span><span style="color: #a018ff">, </span><span style="color: #008c99">u8</span><span style="color: #a018ff">></span> {
     a
-}</code></pre></div><p>The assembly output of this looks like so:</p><div class="code-dark"><pre><code data-lang="gas">cow_as_ref:
-    mov   rax, [rdi + 8]
-    cmp   [rdi], 1
-    lea   rcx, [rdi + 16]
-    lea   rdx, [rdi + 24]
-    cmove rcx, rdx
-    mov   rdx, [rcx]
-    ret
+}</code></pre></div><p>The assembly output of this looks like so:</p><div class="code-dark"><pre><code data-lang="asm">cow_as_ref:
+    <span style="color: #bd5eff">mov</span>   rax, [rdi <span style="color: #bd5eff">+</span> 8]
+    <span style="color: #bd5eff">cmp</span>   [rdi], 1
+    <span style="color: #bd5eff">lea</span>   rcx, [rdi <span style="color: #bd5eff">+</span> 16]
+    <span style="color: #bd5eff">lea</span>   rdx, [rdi <span style="color: #bd5eff">+</span> 24]
+    <span style="color: #bd5eff">cmove</span> rcx, rdx
+    <span style="color: #bd5eff">mov</span>   rdx, [rcx]
+    <span style="color: #bd5eff">ret</span>
 
 cowarr2fields_as_ref:
-    mov rax, [rdi]
-    mov edx, [rdi + 8]
-    ret
+    <span style="color: #bd5eff">mov</span> rax, [rdi]
+    <span style="color: #bd5eff">mov</span> edx, [rdi <span style="color: #bd5eff">+</span> 8]
+    <span style="color: #bd5eff">ret</span>
 
 cowarr3fields_as_ref:
-    mov rax, [rdi]
-    mov edx, [rdi + 8]
-    ret
+    <span style="color: #bd5eff">mov</span> rax, [rdi]
+    <span style="color: #bd5eff">mov</span> edx, [rdi <span style="color: #bd5eff">+</span> 8]
+    <span style="color: #bd5eff">ret</span>
 
 cow_noop:
-    mov    rax, rdi
-    movups xmm0, [rsi]
-    movups xmm1, [rsi + 16]
-    movups [rdi + 16], xmm1
-    movups [rdi], xmm0
-    ret
+    <span style="color: #bd5eff">mov</span>    rax, rdi
+    <span style="color: #bd5eff">movups</span> xmm0, [rsi]
+    <span style="color: #bd5eff">movups</span> xmm1, [rsi <span style="color: #bd5eff">+</span> 16]
+    <span style="color: #bd5eff">movups</span> [rdi <span style="color: #bd5eff">+</span> 16], xmm1
+    <span style="color: #bd5eff">movups</span> [rdi], xmm0
+    <span style="color: #bd5eff">ret</span>
 
 cowarr2fields_noop:
-    mov rdx, rsi
-    mov rax, rdi
-    ret
+    <span style="color: #bd5eff">mov</span> rdx, rsi
+    <span style="color: #bd5eff">mov</span> rax, rdi
+    <span style="color: #bd5eff">ret</span>
 
 cowarr3fields_noop:
-    mov    rax, rdi
-    movups xmm0, [rsi]
-    movups [rdi], xmm0
-    ret</code></pre></div><div class="code-light"><pre><code data-lang="gas">cow_as_ref:
-    mov   rax, [rdi + 8]
-    cmp   [rdi], 1
-    lea   rcx, [rdi + 16]
-    lea   rdx, [rdi + 24]
-    cmove rcx, rdx
-    mov   rdx, [rcx]
-    ret
+    <span style="color: #bd5eff">mov</span>    rax, rdi
+    <span style="color: #bd5eff">movups</span> xmm0, [rsi]
+    <span style="color: #bd5eff">movups</span> [rdi], xmm0
+    <span style="color: #bd5eff">ret</span></code></pre></div><div class="code-light"><pre><code data-lang="asm">cow_as_ref:
+    <span style="color: #a018ff">mov</span>   rax, [rdi <span style="color: #a018ff">+</span> 8]
+    <span style="color: #a018ff">cmp</span>   [rdi], 1
+    <span style="color: #a018ff">lea</span>   rcx, [rdi <span style="color: #a018ff">+</span> 16]
+    <span style="color: #a018ff">lea</span>   rdx, [rdi <span style="color: #a018ff">+</span> 24]
+    <span style="color: #a018ff">cmove</span> rcx, rdx
+    <span style="color: #a018ff">mov</span>   rdx, [rcx]
+    <span style="color: #a018ff">ret</span>
 
 cowarr2fields_as_ref:
-    mov rax, [rdi]
-    mov edx, [rdi + 8]
-    ret
+    <span style="color: #a018ff">mov</span> rax, [rdi]
+    <span style="color: #a018ff">mov</span> edx, [rdi <span style="color: #a018ff">+</span> 8]
+    <span style="color: #a018ff">ret</span>
 
 cowarr3fields_as_ref:
-    mov rax, [rdi]
-    mov edx, [rdi + 8]
-    ret
+    <span style="color: #a018ff">mov</span> rax, [rdi]
+    <span style="color: #a018ff">mov</span> edx, [rdi <span style="color: #a018ff">+</span> 8]
+    <span style="color: #a018ff">ret</span>
 
 cow_noop:
-    mov    rax, rdi
-    movups xmm0, [rsi]
-    movups xmm1, [rsi + 16]
-    movups [rdi + 16], xmm1
-    movups [rdi], xmm0
-    ret
+    <span style="color: #a018ff">mov</span>    rax, rdi
+    <span style="color: #a018ff">movups</span> xmm0, [rsi]
+    <span style="color: #a018ff">movups</span> xmm1, [rsi <span style="color: #a018ff">+</span> 16]
+    <span style="color: #a018ff">movups</span> [rdi <span style="color: #a018ff">+</span> 16], xmm1
+    <span style="color: #a018ff">movups</span> [rdi], xmm0
+    <span style="color: #a018ff">ret</span>
 
 cowarr2fields_noop:
-    mov rdx, rsi
-    mov rax, rdi
-    ret
+    <span style="color: #a018ff">mov</span> rdx, rsi
+    <span style="color: #a018ff">mov</span> rax, rdi
+    <span style="color: #a018ff">ret</span>
 
 cowarr3fields_noop:
-    mov    rax, rdi
-    movups xmm0, [rsi]
-    movups [rdi], xmm0
-    ret</code></pre></div><p>If you can read assembly, you can see that just returning an unmodified <code>Cow</code> requires some messing around with loading and storing data for all the structs apart from <code>CowArr2Fields</code>. If you can’t read assembly, then all you need to know is that the <code>[...]</code> square brackets is a memory access, and <code>cowarr2fields_noop</code> is the only function that doesn’t need them.</p><p>Ok, so we’ve optimised the <code>Cow</code> arrays about as much as we can. Now is when we start to invoke the Dark Magicks and risk the wrath of the Old Ones (you know, the Rust core team). Let’s make a “generic” optimised <code>Cow</code>, one that works with more than just arrays.</p><h2 id="inviting-god-s-wrath-with-cursed-rust-act-3-forgive-me"><span class="section-title">Act 3: Forgive Me</span> <span class="section-link-postfix"><a href="#inviting-god-s-wrath-with-cursed-rust-act-3-forgive-me">§</a></span></h2><p>So this is all well and good, but it’s <em>just not cursed enough</em>. It basically reimplements <code>Cow&lt;[T]></code> with a custom type that doesn’t work for <code>Cow&lt;str></code> - you have to write your own wrapper, maybe call it <code>CowStr</code>. Then repeat that for every type. No, we can do better. We can make a <code>CursedCow</code> that you works the same no matter if it’s <code>CursedCow&lt;[T]></code>, <code>CursedCow&lt;str></code>, or even <code>CursedCow&lt;dyn Trait></code>. That last one is where the code really starts to cause damage to the soul. If you find yourself cast into Hell one day, just know that it may be because you read this article. I think we can both agree that this is a fair and just punishment. Anyway, before we can truly damn ourselves, we need to lay down the groundwork and make the far-simpler <code>CursedCow&lt;[T]></code>/<code>CursedCow&lt;str></code> work. To make this work, we’ll need a trait.</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ff5ea0">pub</span> <span style="color: #ff5ea0">unsafe</span> <span style="color: #5ef1ff">trait</span> Cursed&lt;T: ?Sized>: Borrow&lt;T> {
+    <span style="color: #a018ff">mov</span>    rax, rdi
+    <span style="color: #a018ff">movups</span> xmm0, [rsi]
+    <span style="color: #a018ff">movups</span> [rdi], xmm0
+    <span style="color: #a018ff">ret</span></code></pre></div><p>If you can read assembly, you can see that just returning an unmodified <code>Cow</code> requires some messing around with loading and storing data for all the structs apart from <code>CowArr2Fields</code>. If you can’t read assembly, then all you need to know is that the <code>[...]</code> square brackets is a memory access, and <code>cowarr2fields_noop</code> is the only function that doesn’t need them.</p><p>Ok, so we’ve optimised the <code>Cow</code> arrays about as much as we can. Now is when we start to invoke the Dark Magicks and risk the wrath of the Old Ones (you know, the Rust core team). Let’s make a “generic” optimised <code>Cow</code>, one that works with more than just arrays.</p><h2 id="inviting-god-s-wrath-with-cursed-rust-act-3-forgive-me"><span class="section-title">Act 3: Forgive Me</span> <span class="section-link-postfix"><a href="#inviting-god-s-wrath-with-cursed-rust-act-3-forgive-me">§</a></span></h2><p>So this is all well and good, but it’s <em>just not cursed enough</em>. It basically reimplements <code>Cow&lt;[T]></code> with a custom type that doesn’t work for <code>Cow&lt;str></code> - you have to write your own wrapper, maybe call it <code>CowStr</code>. Then repeat that for every type. No, we can do better. We can make a <code>CursedCow</code> that you works the same no matter if it’s <code>CursedCow&lt;[T]></code>, <code>CursedCow&lt;str></code>, or even <code>CursedCow&lt;dyn Trait></code>. That last one is where the code really starts to cause damage to the soul. If you find yourself cast into Hell one day, just know that it may be because you read this article. I think we can both agree that this is a fair and just punishment. Anyway, before we can truly damn ourselves, we need to lay down the groundwork and make the far-simpler <code>CursedCow&lt;[T]></code>/<code>CursedCow&lt;str></code> work. To make this work, we’ll need a trait.</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ff5ea0">pub</span> <span style="color: #ff5ea0">unsafe</span> <span style="color: #5ef1ff">trait</span> Cursed&lt;T: ?Sized>: Borrow&lt;T> {
     <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">borrowed</span>(<span style="color: #bd5eff">borowed</span>: <span style="color: #bd5eff">&amp;</span>T) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #bd5eff">Option</span><span style="color: #bd5eff">&lt;</span><span style="color: #bd5eff">NonNull</span><span style="color: #bd5eff">&lt;</span><span style="color: #bd5eff">T</span><span style="color: #bd5eff">></span><span style="color: #bd5eff">></span>;
     <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">owned</span>(<span style="color: #bd5eff">self</span>) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #bd5eff">Option</span><span style="color: #bd5eff">&lt;</span><span style="color: #bd5eff">NonNull</span><span style="color: #bd5eff">&lt;</span><span style="color: #bd5eff">T</span><span style="color: #bd5eff">></span><span style="color: #bd5eff">></span>;
     <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">is_owned</span>(<span style="color: #bd5eff">ptr</span>: NonNull&lt;T>) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #5ef1ff">bool</span>;
@@ -1512,82 +1512,82 @@ where
 #[no_mangle]
 <span style="color: #f40064">pub</span> <span style="color: #008c99">fn</span> <span style="color: #0057d1">static_new_cow</span>(<span style="color: #a018ff">cow</span>: <span style="color: #a018ff">Box</span>&lt;Test>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #a018ff">Option</span><span style="color: #a018ff">&lt;</span><span style="color: #a018ff">CursedCow</span><span style="color: #a018ff">&lt;</span><span style="color: #f40064">'static</span><span style="color: #a018ff">, Test</span><span style="color: #a018ff">></span><span style="color: #a018ff">></span> {
     <span style="color: #008c99">CursedCow</span><span style="color: #f40064">::</span>try_owned(cow)
-}</code></pre></div><p>The code made by these functions is pretty amazingly minimal, and almost entirely avoids using the stack - keeping most values in registers. I won’t explain this assembly fully, but it’s here for completeness:</p><div class="code-dark"><pre><code data-lang="gas">dyn_as_ref:
-    mov    rdx, [rdi + 8]
+}</code></pre></div><p>The code made by these functions is pretty amazingly minimal, and almost entirely avoids using the stack - keeping most values in registers. I won’t explain this assembly fully, but it’s here for completeness:</p><div class="code-dark"><pre><code data-lang="asm">dyn_as_ref:
+    <span style="color: #bd5eff">mov</span>    rdx, [rdi <span style="color: #bd5eff">+</span> 8]
     movabs rax, 9223372036854775807
-    and    rax, [rdi]
-    ret
+    <span style="color: #bd5eff">and</span>    rax, [rdi]
+    <span style="color: #bd5eff">ret</span>
 
 dyn_to_cow:
-    mov    rax, rdi
+    <span style="color: #bd5eff">mov</span>    rax, rdi
     movabs rcx, 9223372036854775807
-    and    rcx, rsi
-    test   rsi, rsi
-    jns    .is_ref
-    mov    esi, 1
-    mov    [rax + 8], rcx
-    mov    [rax + 16], rdx
-    mov    [rax], rsi
-    ret
-.is_ref:
-    xor    esi, esi
-    mov    [rax + 8], rcx
-    mov    [rax + 16], rdx
-    mov    [rax], rsi
-    ret
+    <span style="color: #bd5eff">and</span>    rcx, rsi
+    <span style="color: #bd5eff">test</span>   rsi, rsi
+    <span style="color: #bd5eff">jns</span>    <span style="color: #ff5ea0">.</span>is_ref
+    <span style="color: #bd5eff">mov</span>    esi, 1
+    <span style="color: #bd5eff">mov</span>    [rax <span style="color: #bd5eff">+</span> 8], rcx
+    <span style="color: #bd5eff">mov</span>    [rax <span style="color: #bd5eff">+</span> 16], rdx
+    <span style="color: #bd5eff">mov</span>    [rax], rsi
+    <span style="color: #bd5eff">ret</span>
+<span style="color: #ff5ea0">.</span>is_ref:
+    <span style="color: #bd5eff">xor</span>    esi, esi
+    <span style="color: #bd5eff">mov</span>    [rax <span style="color: #bd5eff">+</span> 8], rcx
+    <span style="color: #bd5eff">mov</span>    [rax <span style="color: #bd5eff">+</span> 16], rdx
+    <span style="color: #bd5eff">mov</span>    [rax], rsi
+    <span style="color: #bd5eff">ret</span>
 
 dyn_new_cow:
-    mov    rdx, rsi
-    movabs rcx, -9223372036854775808
-    or     rcx, rdi
-    xor    eax, eax
-    test   rdi, rdi
-    cmovns rax, rcx
-    ret
+    <span style="color: #bd5eff">mov</span>    rdx, rsi
+    movabs rcx, <span style="color: #bd5eff">-</span>9223372036854775808
+    <span style="color: #bd5eff">or</span>     rcx, rdi
+    <span style="color: #bd5eff">xor</span>    eax, eax
+    <span style="color: #bd5eff">test</span>   rdi, rdi
+    <span style="color: #bd5eff">cmovns</span> rax, rcx
+    <span style="color: #bd5eff">ret</span>
 
 static_new_cow:
-    movabs rcx, -9223372036854775808
-    or     rcx, rdi
-    xor    eax, eax
-    test   rdi, rdi
-    cmovns rax, rcx
-    ret</code></pre></div><div class="code-light"><pre><code data-lang="gas">dyn_as_ref:
-    mov    rdx, [rdi + 8]
+    movabs rcx, <span style="color: #bd5eff">-</span>9223372036854775808
+    <span style="color: #bd5eff">or</span>     rcx, rdi
+    <span style="color: #bd5eff">xor</span>    eax, eax
+    <span style="color: #bd5eff">test</span>   rdi, rdi
+    <span style="color: #bd5eff">cmovns</span> rax, rcx
+    <span style="color: #bd5eff">ret</span></code></pre></div><div class="code-light"><pre><code data-lang="asm">dyn_as_ref:
+    <span style="color: #a018ff">mov</span>    rdx, [rdi <span style="color: #a018ff">+</span> 8]
     movabs rax, 9223372036854775807
-    and    rax, [rdi]
-    ret
+    <span style="color: #a018ff">and</span>    rax, [rdi]
+    <span style="color: #a018ff">ret</span>
 
 dyn_to_cow:
-    mov    rax, rdi
+    <span style="color: #a018ff">mov</span>    rax, rdi
     movabs rcx, 9223372036854775807
-    and    rcx, rsi
-    test   rsi, rsi
-    jns    .is_ref
-    mov    esi, 1
-    mov    [rax + 8], rcx
-    mov    [rax + 16], rdx
-    mov    [rax], rsi
-    ret
-.is_ref:
-    xor    esi, esi
-    mov    [rax + 8], rcx
-    mov    [rax + 16], rdx
-    mov    [rax], rsi
-    ret
+    <span style="color: #a018ff">and</span>    rcx, rsi
+    <span style="color: #a018ff">test</span>   rsi, rsi
+    <span style="color: #a018ff">jns</span>    <span style="color: #f40064">.</span>is_ref
+    <span style="color: #a018ff">mov</span>    esi, 1
+    <span style="color: #a018ff">mov</span>    [rax <span style="color: #a018ff">+</span> 8], rcx
+    <span style="color: #a018ff">mov</span>    [rax <span style="color: #a018ff">+</span> 16], rdx
+    <span style="color: #a018ff">mov</span>    [rax], rsi
+    <span style="color: #a018ff">ret</span>
+<span style="color: #f40064">.</span>is_ref:
+    <span style="color: #a018ff">xor</span>    esi, esi
+    <span style="color: #a018ff">mov</span>    [rax <span style="color: #a018ff">+</span> 8], rcx
+    <span style="color: #a018ff">mov</span>    [rax <span style="color: #a018ff">+</span> 16], rdx
+    <span style="color: #a018ff">mov</span>    [rax], rsi
+    <span style="color: #a018ff">ret</span>
 
 dyn_new_cow:
-    mov    rdx, rsi
-    movabs rcx, -9223372036854775808
-    or     rcx, rdi
-    xor    eax, eax
-    test   rdi, rdi
-    cmovns rax, rcx
-    ret
+    <span style="color: #a018ff">mov</span>    rdx, rsi
+    movabs rcx, <span style="color: #a018ff">-</span>9223372036854775808
+    <span style="color: #a018ff">or</span>     rcx, rdi
+    <span style="color: #a018ff">xor</span>    eax, eax
+    <span style="color: #a018ff">test</span>   rdi, rdi
+    <span style="color: #a018ff">cmovns</span> rax, rcx
+    <span style="color: #a018ff">ret</span>
 
 static_new_cow:
-    movabs rcx, -9223372036854775808
-    or     rcx, rdi
-    xor    eax, eax
-    test   rdi, rdi
-    cmovns rax, rcx
-    ret</code></pre></div><p>Anyway, if you want to try this out then I recommend the <a href="https://crates.io/crates/beef/"><code>beef</code> crate</a>, which acts as a drop- in replacement for <code>std::borrow::Cow</code> for most cases. It’s written by my colleague and friend, and this article came about due to discussions about how to optimise that crate for the usecase of parsing JSON. It doesn’t include our incredibly sketchy <code>dyn Trait</code> implementation, thank god. There’s also the simpler <a href="https://crates.io/crates/cowvec/"><code>cowvec</code> crate</a>, which is my earlier implementation, roughly equivalent to the code we had at the end of Act 2. I’d only recommend <code>beef</code> over <code>cowvec</code> because <code>cowvec</code> doesn’t act as a drop-in replacement as it has a different signature to <code>std::borrow::Cow</code>. Well, that and the fact that <code>beef</code> is clearly the far better name.</p><p>The JSON-parsing crate <code>simdjson-rs</code> actually integrated <code>beef</code> recently, and you can see the improvements to throughput that they saw just from switching out their <code>Cow</code> implementation in the integration PR.</p><p>Now if you don’t mind, I’m going to go seek the advice of a priest.</p><blockquote><strong>NOTE</strong>: This article originally contained an extended section about how to extend this implementation to support inlining data, but this was considered too cursed for the eyes of mere mortals. Perhaps after I’ve thoroughly cleansed myself with holy water, I may be able to bring myself to write an additional article detailing how to implement this within our existing framework.</blockquote></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>
+    movabs rcx, <span style="color: #a018ff">-</span>9223372036854775808
+    <span style="color: #a018ff">or</span>     rcx, rdi
+    <span style="color: #a018ff">xor</span>    eax, eax
+    <span style="color: #a018ff">test</span>   rdi, rdi
+    <span style="color: #a018ff">cmovns</span> rax, rcx
+    <span style="color: #a018ff">ret</span></code></pre></div><p>Anyway, if you want to try this out then I recommend the <a href="https://crates.io/crates/beef/"><code>beef</code> crate</a>, which acts as a drop- in replacement for <code>std::borrow::Cow</code> for most cases. It’s written by my colleague and friend, and this article came about due to discussions about how to optimise that crate for the usecase of parsing JSON. It doesn’t include our incredibly sketchy <code>dyn Trait</code> implementation, thank god. There’s also the simpler <a href="https://crates.io/crates/cowvec/"><code>cowvec</code> crate</a>, which is my earlier implementation, roughly equivalent to the code we had at the end of Act 2. I’d only recommend <code>beef</code> over <code>cowvec</code> because <code>cowvec</code> doesn’t act as a drop-in replacement as it has a different signature to <code>std::borrow::Cow</code>. Well, that and the fact that <code>beef</code> is clearly the far better name.</p><p>The JSON-parsing crate <code>simdjson-rs</code> actually integrated <code>beef</code> recently, and you can see the improvements to throughput that they saw just from switching out their <code>Cow</code> implementation in the integration PR.</p><p>Now if you don’t mind, I’m going to go seek the advice of a priest.</p><blockquote><strong>NOTE</strong>: This article originally contained an extended section about how to extend this implementation to support inlining data, but this was considered too cursed for the eyes of mere mortals. Perhaps after I’ve thoroughly cleansed myself with holy water, I may be able to bring myself to write an additional article detailing how to implement this within our existing framework.</blockquote></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>
