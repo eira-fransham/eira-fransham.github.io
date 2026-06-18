@@ -1,135 +1,741 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>Why Write Smart Contracts in Rust?</title>
-    
-    <meta name="description" content="">
-    
-    <meta itemprop="name" content="Why Write Smart Contracts in Rust?">
-    
-    
-    <meta name="og:title" content="Why Write Smart Contracts in Rust?">
-    
-        <meta name="image" content="http://troubles.md/floppies.png">
-        <meta name="og:image" content="http://troubles.md/floppies.png">
-       <meta name="og:url" content="http://troubles.md/why-write-smart-contracts-in-rust/">
-    <meta name="og:site_name" content="Why Write Smart Contracts in Rust?">
-    <meta name="og:type" content="article">
-    
-    <meta name="article:tag" content="">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/style.css">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/syntax.css">
-    <script async>
-        window.onload = function() {
-            var possibilities = [
-                 "A high-level view of low-level code",  "Writing words and reading DWORDS", 
-            ];
+<!DOCTYPE html><html><head><meta name="og:type" content="article"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="og:title" content="Why Write Smart Contracts in Rust?"><meta itemprop="name" content="Why Write Smart Contracts in Rust?"><meta name="image" content="floppies.png"><meta name="og:image" content="floppies.png"><title>Why Write Smart Contracts in Rust? - troubles.md</title><style rel="stylesheet" type="text/css">@import url("https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square");
 
-            document.getElementById('subtitle').innerHTML = possibilities[Math.floor(possibilities.length * Math.random())];
-        };
-    </script>
-</head>
+/* Light theme by default */
+:root {
+    --main-header-font: "Bevan", monospace;
+    --secondary-header-font: "Sanchez", monospace;
+    --body-font: "Lato", sans-serif;
+    --code-font: "Cascadia Mono", monospace;
+    --default-inset: 11pt;
+    --expanded-inset: 20pt;
+    --title-inset: 28pt;
+    --background-color: #fff;
+    --header-font-color: #777;
+    --font-color: #000;
+    --pre-font-color: #333;
+    --date-color: #667;
+    --code-background-color: #f7f7f7;
+    --accent-color: #0594cb;
+}
 
-<body>
+@counter-style custom {
+    system: cyclic;
+    symbols: "┃";
+    suffix: " ";
+}
 
-<header>
-    
-    <span>
-        <a href="http://troubles.md/" class="title"><strong>troubles.md</strong></a>
-        <span class="dash"> - </span><p id="subtitle" class="subtitle">A high-level view of low-level code</p>
-        
-        
-    </span>
-    
-    <a class="rss" href="http://troubles.md/index.xml">
-        <strong>
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="feather feather-rss"
-            >
-                <path d="M4 11a9 9 0 0 1 9 9">
-                </path>
-                <path d="M4 4a16 16 0 0 1 16 16">
-                </path>
-                <circle cx="5" cy="19" r="1">
-                </circle>
-            </svg>
-        </strong>
-    </a>
-</header>
+.code-dark {
+    display: none;
+}
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #252525;
+        --header-font-color: #aaa;
+        --font-color: #eee;
+        --pre-font-color: #bababa;
+        --date-color: #999;
+        --code-background-color: #333;
+    }
 
-<div class="content">
-  <h1>Why Write Smart Contracts in Rust? <aside></aside></h1>
-  <!-- raw HTML omitted -->
-<p>As I alluded to in <a href="http://troubles.md/rust-smart-contracts/">my previous post on WebAssembly smart contracts</a>, it&rsquo;s somewhat of an open secret that Solidity and the EVM ecosystem isn&rsquo;t up to par with other development environments like web or mobile development. Debugging it is difficult, the tooling support for essentials like autocompletion and go-to-definition might as well be non-existant, not to mention that developers well-versed in Solidity programming are extremely rare. Even some of the most-experienced Solidity developers in the world still shoot themselves in the feet with its wide array of novel and interesting footguns.</p>
-<p>The future of smart contracts, in my eyes and the eyes of many others, lies with <a href="https://webassembly.org/">WebAssembly</a>. This is a virtual machine specification which essentially acts as a portable and simple RISC ISA - since it matches the runtime model of a CPU many existing languages can be compiled to it unchanged. Apart from special-case DSLs like Solidity most languages expose the runtime model of the CPU somehow. Not only that, but its similarity to the CPU allows it to be compiled to incredibly efficient machine code without complex optimisations that can affect correctness and increase code complexity.</p>
-<p>At Parity we&rsquo;re working on a library called Fleetwood, intended to make writing smart contracts in Rust as convenient as writing them in Solidity. Rust is still a young language, but the tooling support is already years ahead of Solidity. It has an integrated test and benchmark runner, a linter, a code formatter, syntax highlighting in every text editor I can think of and on GitHub, not to mention that the language itself has many features that makes writing Rust code both more ergonomic and easier to get right than the same in Solidity. Additionally, Rust data structures are very compact - actually more compact than C in many cases since the compiler reorders struct fields to make each type as small as possible. This is important in the space-constrained world of the blockchain.</p>
-<p>A sample of what a simple ERC20 token contract written in this library looks like:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="n">messages</span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="n">TotalSupply</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="nc">U256</span><span class="p">;</span><span class="w">
-</span><span class="w">    </span><span class="n">BalanceOf</span><span class="p">(</span><span class="n">Address</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">U256</span><span class="p">;</span><span class="w">
-</span><span class="w">    </span><span class="n">Transfer</span><span class="p">(</span><span class="n">Address</span><span class="p">,</span><span class="w"> </span><span class="n">U256</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">bool</span><span class="p">;</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="n">state</span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="k">struct</span> <span class="nc">State</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="n">balances</span>: <span class="nc">Database</span><span class="o">&lt;</span><span class="n">Address</span><span class="p">,</span><span class="w"> </span><span class="n">U256</span><span class="o">&gt;</span><span class="p">,</span><span class="w">
-</span><span class="w">        </span><span class="n">total</span>: <span class="nc">U256</span><span class="p">,</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="n">Contract</span>::<span class="n">new</span><span class="p">()</span><span class="w">
-</span><span class="w">    </span><span class="p">.</span><span class="n">constructor</span><span class="p">(</span><span class="o">|</span><span class="n">_</span><span class="p">,</span><span class="w"> </span><span class="n">total_supply</span>: <span class="nc">U256</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">database</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Database</span>::<span class="n">new</span><span class="p">();</span><span class="w">
-</span><span class="w">        </span><span class="n">database</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="o">&amp;</span><span class="n">Address</span>::<span class="n">default</span><span class="p">(),</span><span class="w"> </span><span class="n">total_supply</span><span class="p">.</span><span class="n">clone</span><span class="p">());</span><span class="w">
-</span><span class="w">        </span><span class="n">State</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">            </span><span class="n">total</span>: <span class="nc">total_supply</span><span class="p">.</span><span class="n">into</span><span class="p">(),</span><span class="w">
-</span><span class="w">            </span><span class="n">balances</span>: <span class="nc">database</span><span class="p">.</span><span class="n">into</span><span class="p">(),</span><span class="w">
-</span><span class="w">        </span><span class="p">}</span><span class="w">
-</span><span class="w">    </span><span class="p">})</span><span class="w">
-</span><span class="w">    </span><span class="p">.</span><span class="n">on_msg</span>::<span class="o">&lt;</span><span class="n">BalanceOf</span><span class="o">&gt;</span><span class="p">(</span><span class="o">|</span><span class="n">_env</span><span class="p">,</span><span class="w"> </span><span class="n">state</span><span class="p">,</span><span class="w"> </span><span class="n">address</span><span class="o">|</span><span class="w"> </span><span class="n">state</span><span class="p">.</span><span class="n">balances</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">address</span><span class="p">))</span><span class="w">
-</span><span class="w">    </span><span class="p">.</span><span class="n">on_msg</span>::<span class="o">&lt;</span><span class="n">TotalSupply</span><span class="o">&gt;</span><span class="p">(</span><span class="o">|</span><span class="n">_env</span><span class="p">,</span><span class="w"> </span><span class="n">state</span><span class="p">,</span><span class="w"> </span><span class="p">()</span><span class="o">|</span><span class="w"> </span><span class="o">*</span><span class="n">state</span><span class="p">.</span><span class="n">total</span><span class="p">)</span><span class="w">
-</span><span class="w">    </span><span class="p">.</span><span class="n">on_msg_mut</span>::<span class="o">&lt;</span><span class="n">Transfer</span><span class="o">&gt;</span><span class="p">(</span><span class="o">|</span><span class="n">env</span><span class="p">,</span><span class="w"> </span><span class="n">state</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="n">amount</span><span class="p">)</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">U256</span>::<span class="n">zero</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">false</span><span class="p">;</span><span class="w">
-</span><span class="w">        </span><span class="p">}</span><span class="w">
-</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">from</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">env</span><span class="p">.</span><span class="n">original_caller</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">existing_from</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">state</span><span class="p">.</span><span class="n">balances</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">from</span><span class="p">);</span><span class="w">
-</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">existing_to</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">state</span><span class="p">.</span><span class="n">balances</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">to</span><span class="p">);</span><span class="w">
-</span><span class="w">
-</span><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">existing_from</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">            </span><span class="n">state</span><span class="p">.</span><span class="n">balances</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="o">&amp;</span><span class="n">from</span><span class="p">,</span><span class="w"> </span><span class="n">existing_from</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">amount</span><span class="p">);</span><span class="w">
-</span><span class="w">            </span><span class="n">state</span><span class="p">.</span><span class="n">balances</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="o">&amp;</span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="n">existing_to</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">amount</span><span class="p">);</span><span class="w">
-</span><span class="w">
-</span><span class="w">            </span><span class="kc">true</span><span class="w">
-</span><span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">            </span><span class="kc">false</span><span class="w">
-</span><span class="w">        </span><span class="p">}</span><span class="w">
-</span><span class="w">    </span><span class="p">})</span><span class="w">
-</span></code></pre></div><p>This is a reimplementation of the ERC20 contract given as an example in the tutorial for <a href="https://github.com/paritytech/pwasm-tutorial">our old API</a>. The &ldquo;message&rdquo; concept might seem a bit alien to you if you&rsquo;re used to these being methods on a contract but they work the exact same way. The &ldquo;message&rdquo; language betrays one of the magic powers that this library has - abstracting different WebAssembly smart contract platforms away from you. Currently the only WebAssembly smart contract platform supported by Parity is the Kovan testnet, but the idea is that you will be able to write contracts that work on either Kovan, Ethereum mainnet (if and when that supports WebAssembly), Polkadot and our yet-to-be-announced proof-of-stake smart contract platform built on <a href="http://troubles.md/what-is-substrate/">Substrate</a>. If you need to use specific features of any particular network you can be explicit about that, and maybe enable or disable certain features or smart contract methods depending on whether the chain supports what those features require. This can be done entirely within the Rust trait system, and so you can find out whether your contract will work on a particular network without even attempting to compile your contract for that network. Our intention is that a smart contract can start its life on Kovan and then as more networks come to maturity you can move to them with little-to-no code changes, and any necessary code changes being guided by the compiler.</p>
-<p>The &ldquo;message&rdquo; language is an abstraction of methods to include asynchronous methods - currently method calls in Ethereum and Kovan are synchronous but with a totally asynchronous smart contract platform you can have implicit parallelism and cheaper-and-better sharding without affecting correctness. Sharding Ethereum is artificially taxed with the requirement to maintain the existing synchronous semantics. The &ldquo;message&rdquo; concept supports both synchronous and actor-model asynchronous code, code written to accomodate asynchronous chains will work on Ethereum too but will be able to take advantage of future improvements in blockchain technology. We hope to reduce the difficulty of writing asynchronous code by allowing you to write synchronous-style code with the <a href="https://github.com/rust-lang-nursery/futures-rs"><code>futures</code></a> library. The <code>futures</code> library will be the backbone of Rust&rsquo;s <code>async</code>/<code>await</code> syntax, which will allow code that needs conceptual synchronicity to be simple and ergonomic without sacrificing the benefits of asynchronicity.</p>
-<p>Having said that, the current version of the library is still synchronous. Asynchronicity is a future goal but is not yet implemented. When it is implemented, Rust&rsquo;s strong compile-time guarantees mean that you should just need to follow the compiler errors and add <code>await</code> where necessary. Even if we never take advantage of asynchronicity, the more modern smart contract platforms that our library is written to be compatible with will be significantly more efficient than Ethereum by virtue of a more-efficient consensus mechanism and a more-performant virtual machine.</p>
-<p>For smart contracts that don&rsquo;t need Ethereum&rsquo;s more stable value and wide-reaching token supply (read: any blockchain project that isn&rsquo;t an ICO) you could imagine that the improved performance of the more modern blockchains could be an <a href="https://hackernoon.com/startup-advice-build-for-your-unfair-advantage-f68efc61c599">&ldquo;unfair advantage&rdquo;</a> that other dApp developers can&rsquo;t take advantage of without rebuilding their product from scratch. In the blockchain world, performance is even more important than in other software. The more performant your software is, the lower the price of using it. You can start deploying now and let the platform improve underneath you.</p>
-<p>If you&rsquo;re a developer and you care more about ergonomics and ease of use - since this library is just normal Rust code without any code generation or macro magic it works out-of-the-box with code completion using <a href="https://github.com/rust-lang-nursery/rls">RLS</a> and (as long as you don&rsquo;t mind mocking out external contracts) immediate-feedback local testing with <code>cargo test</code>. Test-driven development - not impossible in Solidity but certainly difficult - can be done without even having a blockchain client installed at all, although if you want to interact with contracts not written in this library as part of your tests you will have to connect to a client. It&rsquo;s possible that in the future we will embed an instance of the Ethereum virtual machine in order to allow you to include Solidity contracts as part of your tests.</p>
-<p>I hope this short article gave you an idea of some of the business and process benefits of writing smart contracts in Rust. For some more developer-focussed benefits to writing smart contract code in Rust, I highly recommend you check out the <a href="http://troubles.md/rust-smart-contracts/">first article in this series</a>.</p>
+    footer img {
+        filter: invert();
+    }
 
-</div>
+    .code-dark {
+        display: block;
+    }
 
-<footer>
-	<p>© 2017-2018, all rights reserved.</a>
-</footer>
-</body>
-</html>
+    .code-light {
+        display: none;
+    }
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--font-color);
+}
+
+body,
+li p {
+    font-family: var(--body-font), sans-serif;
+    letter-spacing: 0.15pt;
+    word-spacing: 0.08pt;
+    line-height: 1.8;
+}
+
+h2,
+h3 {
+    --line-width: 9pt;
+    --inset: var(--title-inset);
+
+    display: flex;
+    flex-direction: row;
+    background-color: var(--code-background-color);
+    border-left: var(--line-width) solid var(--accent-color);
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+    padding-left: calc(var(--inset) - var(--line-width));
+    padding-right: 0.6rem;
+    padding-bottom: 0.2rem;
+    margin-top: 2.1rem;
+    margin-bottom: 0.4rem;
+}
+
+h2 span,
+h3 span {
+    display: none;
+}
+
+h2 .section-title,
+h3 .section-title {
+    display: inline-block;
+}
+
+.section-link-postfix {
+    display: flex;
+
+    flex-direction: column;
+    justify-content: space-around;
+
+    font-family: var(--body-font);
+    font-size: 90%;
+    padding-left: 12pt;
+    margin-left: auto;
+}
+
+.section-link-postfix a {
+    opacity: 0.7;
+    color: var(--header-font-color);
+}
+
+h2 a span,
+h3 a span {
+    font-size: 18px;
+    color: var(--code-background-color);
+}
+
+h2 a span {
+    padding-top: 0.5rem;
+}
+
+h3 a span {
+    padding-top: 0.1rem;
+}
+
+h2 .section-link a:hover,
+h3 .section-link a:hover {
+    background-color: var(--accent-color);
+}
+
+h2 .section-link a:hover span,
+h3 .section-link a:hover span {
+    display: block;
+}
+
+a .section-link {
+    font-size: calc(100% * var(--font-perc));
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--secondary-header-font), serif;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+}
+
+a code {
+    color: var(--accent-color);
+}
+
+h1 {
+    font-family: var(--main-header-font), serif;
+    font-weight: normal;
+    letter-spacing: 1pt;
+    display: block;
+    font-size: 250%;
+    line-height: 1.2;
+    padding-top: 0.02em;
+    margin-top: 1em;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+h2 {
+    font-size: 170%;
+}
+
+h3 {
+    font-size: 120%;
+}
+
+.post-link {
+    margin-bottom: 1em;
+}
+
+.post-link a {
+    font-family: var(--secondary-header-font);
+    color: var(--font-color);
+}
+
+header .blog-name a {
+    font-family: "Nova Square";
+    font-size: 130%;
+    letter-spacing: 3pt;
+    color: var(--font-color);
+    border-right: 3px solid var(--accent-color);
+}
+
+@keyframes blink-cursor {
+    50% {
+        border-right: unset;
+    }
+}
+
+header .blog-name a:hover {
+    animation: blink-cursor 1s linear infinite;
+}
+
+header,
+header a {
+    color: var(--header-font-color);
+    text-decoration: none;
+}
+
+/* reset */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    height: 100%;
+}
+
+li:target {
+    background-color: var(--code-background-color);
+}
+
+body {
+    padding: 0rem 0em 0rem 0em;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "kern=1";
+    -moz-font-feature-settings: "kern" 1;
+    -webkit-font-feature-settings: "kern" 1;
+    -o-font-feature-settings: "kern" 1;
+    -ms-font-feature-settings: "kern" 1;
+    font-feature-settings: "kern" 1;
+
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "liga=1";
+    -moz-font-feature-settings: "liga" 1;
+    -webkit-font-feature-settings: "liga" 1;
+    -o-font-feature-settings: "liga" 1;
+    -ms-font-feature-settings: "liga" 1;
+    font-feature-settings: "liga" 1;
+}
+
+.spon {
+    width: 100%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 14px;
+    background-color: rgb(243, 243, 165);
+    border-left: 3px solid var(--font-color);
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    padding-left: 12px;
+    padding-top: 5px;
+}
+
+.attribution {
+    display: block;
+    font-size: 18px;
+    font-family: "Montserrat", sans-serif;
+    width: 100%;
+    line-height: 1.8;
+    margin-top: 5px;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+header {
+    --inset: var(--title-inset);
+
+    font-family: "Cascadia Mono";
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.2;
+    justify-content: space-between;
+    /*background-color: var(--code-background-color);*/
+    display: flex;
+    letter-spacing: 0.7pt;
+    align-items: center;
+    padding: 0.5rem var(--inset);
+    border-bottom: 0.1em solid var(--header-font-color);
+    margin-bottom: 1.5rem;
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+}
+
+header a:hover {
+    color: var(--header-font-color);
+}
+
+.blog-name {
+    font-weight: 900;
+    justify-self: start;
+}
+
+.tagline {
+    justify-self: end;
+    font-weight: 100;
+}
+
+.blog-name,
+.tagline {
+    margin-bottom: 0px;
+    text-decoration: none;
+}
+
+footer {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 180px;
+}
+
+footer img {
+    width: 30px;
+    height: 30px;
+}
+
+.footnotes li p {
+    display: inline;
+}
+
+.ft-return-link {
+    display: inline;
+    margin-left: 0.5em;
+}
+
+.title {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.title aside {
+    width: 100%;
+    text-align: right;
+}
+
+.post-link:first-of-type {
+    margin-top: 1rem;
+}
+
+.post-link {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.post-link aside {
+    min-width: 152px;
+}
+
+.post-link a {
+    padding-left: var(--default-inset);
+    margin-left: calc(-1 * var(--default-inset));
+    line-height: 1.6;
+    padding-right: 1.5rem;
+    flex-grow: 1;
+}
+
+aside {
+    font-family: "Lato", sans-serif;
+    font-size: 0.84rem;
+    align-self: center;
+    line-height: 1.4;
+    color: var(--date-color);
+    text-align: right;
+    margin-right: 1em;
+    text-wrap-mode: nowrap;
+}
+
+aside em {
+    font-size: 0.7rem;
+}
+
+p {
+    margin-bottom: 1em;
+}
+
+ul {
+    list-style: custom;
+}
+
+ul li::marker {
+    color: var(--accent-color);
+}
+
+ol li::marker {
+    color: var(--header-font-color);
+}
+
+li li::marker {
+    color: var(--date-color);
+}
+
+ul {
+    margin-bottom: 1em;
+}
+
+ul ul,
+ol ol {
+    margin-bottom: 0;
+    padding-left: 1em;
+}
+
+li p {
+    margin-bottom: 0;
+}
+
+li {
+    padding-left: 0.3em;
+    margin-left: 1em;
+    margin-bottom: 0.5em;
+}
+
+table {
+    margin-bottom: 1.5em;
+    border-collapse: collapse;
+    width: 95%;
+}
+
+table tr + tr {
+    border-top: 1px solid #ccc;
+}
+table td + td {
+    border-left: 1px solid #ccc;
+}
+
+table td {
+    padding: 0.4em;
+    text-align: center;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+table th {
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 95%;
+    padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+    line-height: 1.05;
+}
+
+img {
+    width: 100%;
+}
+
+a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+div.nav a:active div {
+    background: #cacaca;
+}
+
+a:active {
+    color: var(--header-font-color);
+}
+
+a:hover {
+    background: var(--code-background-color);
+}
+
+.post-link a:hover {
+    color: var(--date-color);
+}
+
+pre {
+    margin-left: var(--expanded-inset);
+    margin-right: var(--expanded-inset);
+    padding-left: 1.4em;
+    padding-top: 1em;
+    padding-bottom: 1em;
+    margin-bottom: 1em;
+    background-color: var(--code-background-color);
+    overflow: auto;
+    line-height: 1.5;
+    letter-spacing: -0.2pt;
+    border-left: 3.5px solid #bbb;
+    font-size: 85%;
+}
+
+code {
+    font-family: var(--code-font), monospace;
+    color: var(--pre-font-color);
+    display: inline-block;
+    max-width: 100%;
+    font-variant-ligatures: none;
+    text-rendering: auto;
+    -moz-font-feature-settings: "liga=0";
+    -moz-font-feature-settings: "liga" 0;
+    -webkit-font-feature-settings: "liga" 0;
+    -o-font-feature-settings: "liga" 0;
+    -ms-font-feature-settings: "liga" 0;
+    font-feature-settings: "liga" 0;
+}
+
+h1 > code,
+h2 > code,
+h3 > code,
+h4 > code,
+p > code {
+    display: inline-block;
+    text-transform: none;
+    padding-left: 0.1em;
+    padding-right: 0.1em;
+    font-size: 103%;
+    color: var(--pre-font-color);
+}
+
+figcaption {
+    font-weight: 400;
+    font-style: italic;
+    font-size: 0.7em/1.52;
+    line-height: 1.3;
+    color: #666665;
+    outline: 0;
+    z-index: 300;
+    text-align: center;
+}
+
+blockquote {
+    border-left: 3.5px solid var(--accent-color);
+    margin: 10px var(--expanded-inset);
+    padding: var(--default-inset) 20px;
+}
+
+blockquote p {
+    display: inline;
+}
+
+.content {
+    margin-bottom: 30px;
+}
+
+@media all {
+    html {
+        font-size: 18px;
+    }
+    .main {
+        margin-left: 7.5rem;
+        margin-right: 7.5rem;
+    }
+}
+@media all and (max-width: 1200px) {
+    pre {
+        margin-left: var(--default-inset);
+        margin-right: var(--default-inset);
+    }
+
+    blockquote {
+        margin: 0.7em var(--default-inset);
+    }
+}
+@media all and (max-width: 840px) {
+    h2,
+    h3 {
+        padding-left: var(--default-inset);
+        padding-right: var(--default-inset);
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    .post-link {
+        flex-direction: column-reverse;
+        justify-content: unset;
+    }
+
+    .post-link aside {
+        align-self: start;
+        text-align: left;
+    }
+
+    .title h1 {
+        text-align: center;
+    }
+
+    .main {
+        margin-left: 4rem;
+        margin-right: 4rem;
+    }
+}
+@media all and (max-width: 760px) {
+    .title h1 {
+        font-size: 24pt;
+    }
+
+    .main {
+        margin-left: 2.5rem;
+        margin-right: 2.5rem;
+    }
+}
+@media all and (max-width: 580px) {
+    .title h1 {
+        font-size: 20pt;
+    }
+
+    .tagline {
+        display: block;
+        font-size: 12px;
+    }
+
+    h2,
+    h3 {
+        --line-width: 4pt;
+        --inset: var(--default-inset);
+
+        margin-top: 0.4em;
+        padding-left: calc(var(--inset) - var(--line-width));
+    }
+
+    h2 .section-link,
+    h3 .section-link {
+        display: none;
+    }
+
+    h2 {
+        padding-top: 2pt;
+        font-size: 20pt;
+        padding-bottom: 2pt;
+    }
+
+    h3 {
+        font-size: 17pt;
+    }
+
+    aside.date-short {
+        display: none;
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    body,
+    li p {
+        line-height: 1.5;
+    }
+
+    header .separator {
+        visibility: collapse;
+    }
+
+    .main {
+        margin: 0 var(--default-inset);
+    }
+}
+</style></head><body><div class="main"><header><span class="blog-name"><a href="../index.html">troubles.md</a></span> <span class="tagline">Writing words and reading dwords</span></header><span></span><div class="content"><div class="title"><h1>Why Write Smart Contracts in Rust?</h1><aside>05 July, 2018</aside></div><div class="post"><p>This post was sponsored by my employer, <a href="http://paritytech.io/">Parity Technologies</a> As I alluded to in <a href="/rust-smart-contracts">my previous post on WebAssembly smart contracts</a>, it’s somewhat of an open secret that Solidity and the EVM ecosystem isn’t up to par with other development environments like web or mobile development. Debugging it is difficult, the tooling support for essentials like autocompletion and go-to-definition might as well be non-existant, not to mention that developers well-versed in Solidity programming are extremely rare. Even some of the most-experienced Solidity developers in the world still shoot themselves in the feet with its wide array of novel and interesting footguns.</p><p>The future of smart contracts, in my eyes and the eyes of many others, lies with <a href="https://webassembly.org/">WebAssembly</a>. This is a virtual machine specification which essentially acts as a portable and simple RISC ISA - since it matches the runtime model of a CPU many existing languages can be compiled to it unchanged. Apart from special-case DSLs like Solidity most languages expose the runtime model of the CPU somehow. Not only that, but its similarity to the CPU allows it to be compiled to incredibly efficient machine code without complex optimisations that can affect correctness and increase code complexity.</p><p>At Parity we’re working on a library called Fleetwood, intended to make writing smart contracts in Rust as convenient as writing them in Solidity. Rust is still a young language, but the tooling support is already years ahead of Solidity. It has an integrated test and benchmark runner, a linter, a code formatter, syntax highlighting in every text editor I can think of and on GitHub, not to mention that the language itself has many features that makes writing Rust code both more ergonomic and easier to get right than the same in Solidity. Additionally, Rust data structures are very compact - actually more compact than C in many cases since the compiler reorders struct fields to make each type as small as possible. This is important in the space-constrained world of the blockchain.</p><p>A sample of what a simple ERC20 token contract written in this library looks like:</p><div class="code-dark"><pre><code data-lang="rust">messages! {
+    TotalSupply() <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> U256</span>;
+    BalanceOf(Address) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> U256</span>;
+    Transfer(Address, U256) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #5ef1ff">bool</span>;
+}
+
+state! {
+    <span style="color: #5ef1ff">struct</span> State {
+        balances: Database&lt;Address, U256>,
+        total: U256,
+    }
+}
+
+<span style="color: #5ef1ff">Contract</span><span style="color: #ff5ea0">::</span>new()
+    <span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">constructor</span>(|_, <span style="color: #bd5eff">total_supply</span>: U256| {
+        <span style="color: #5ef1ff">let</span> <span style="color: #ff5ea0">mut</span> database <span style="color: #bd5eff">=</span> <span style="color: #5ef1ff">Database</span><span style="color: #ff5ea0">::</span>new();
+        database<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">insert</span>(<span style="color: #bd5eff">&amp;</span><span style="color: #5ef1ff">Address</span><span style="color: #ff5ea0">::</span>default(), total_supply<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">clone</span>());
+        State {
+            total: total_supply<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into</span>(),
+            balances: database<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into</span>(),
+        }
+    })
+    <span style="color: #ff5ea0">.</span><span style="color: #5ef1ff">on_msg</span><span style="color: #ff5ea0">::</span>&lt;BalanceOf>(|<span style="color: #bd5eff">_env</span>, <span style="color: #bd5eff">state</span>, <span style="color: #bd5eff">address</span>| state<span style="color: #ff5ea0">.</span>balances<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">get</span>(<span style="color: #bd5eff">&amp;</span>address))
+    <span style="color: #ff5ea0">.</span><span style="color: #5ef1ff">on_msg</span><span style="color: #ff5ea0">::</span>&lt;TotalSupply>(|<span style="color: #bd5eff">_env</span>, <span style="color: #bd5eff">state</span>, ()| <span style="color: #bd5eff">*</span>state<span style="color: #ff5ea0">.</span>total)
+    <span style="color: #ff5ea0">.</span><span style="color: #5ef1ff">on_msg_mut</span><span style="color: #ff5ea0">::</span>&lt;Transfer>(|<span style="color: #bd5eff">env</span>, <span style="color: #bd5eff">state</span>, (<span style="color: #bd5eff">to</span>, <span style="color: #bd5eff">amount</span>)| {
+        <span style="color: #ffbd5e">if</span> amount <span style="color: #bd5eff">==</span> U256<span style="color: #ff5ea0">::</span>zero() {
+            <span style="color: #ffbd5e">return</span> false;
+        }
+        <span style="color: #5ef1ff">let</span> from <span style="color: #bd5eff">=</span> env<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">original_caller</span>();
+
+        <span style="color: #5ef1ff">let</span> existing_from <span style="color: #bd5eff">=</span> state<span style="color: #ff5ea0">.</span>balances<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">get</span>(<span style="color: #bd5eff">&amp;</span>from);
+        <span style="color: #5ef1ff">let</span> existing_to <span style="color: #bd5eff">=</span> state<span style="color: #ff5ea0">.</span>balances<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">get</span>(<span style="color: #bd5eff">&amp;</span>to);
+
+        <span style="color: #ffbd5e">if</span> existing_from <span style="color: #bd5eff">>=</span> amount {
+            state<span style="color: #ff5ea0">.</span>balances<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">insert</span>(<span style="color: #bd5eff">&amp;</span>from, existing_from <span style="color: #bd5eff">-</span> amount);
+            state<span style="color: #ff5ea0">.</span>balances<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">insert</span>(<span style="color: #bd5eff">&amp;</span>to, existing_to <span style="color: #bd5eff">+</span> amount);
+
+            true
+        } <span style="color: #ffbd5e">else</span> {
+            false
+        }
+    })
+</code></pre></div><div class="code-light"><pre><code data-lang="rust">messages! {
+    TotalSupply() <span style="color: #a018ff">-></span><span style="color: #a018ff"> U256</span>;
+    BalanceOf(Address) <span style="color: #a018ff">-></span><span style="color: #a018ff"> U256</span>;
+    Transfer(Address, U256) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #008c99">bool</span>;
+}
+
+state! {
+    <span style="color: #008c99">struct</span> State {
+        balances: Database&lt;Address, U256>,
+        total: U256,
+    }
+}
+
+<span style="color: #008c99">Contract</span><span style="color: #f40064">::</span>new()
+    <span style="color: #f40064">.</span><span style="color: #0057d1">constructor</span>(|_, <span style="color: #a018ff">total_supply</span>: U256| {
+        <span style="color: #008c99">let</span> <span style="color: #f40064">mut</span> database <span style="color: #a018ff">=</span> <span style="color: #008c99">Database</span><span style="color: #f40064">::</span>new();
+        database<span style="color: #f40064">.</span><span style="color: #0057d1">insert</span>(<span style="color: #a018ff">&amp;</span><span style="color: #008c99">Address</span><span style="color: #f40064">::</span>default(), total_supply<span style="color: #f40064">.</span><span style="color: #0057d1">clone</span>());
+        State {
+            total: total_supply<span style="color: #f40064">.</span><span style="color: #0057d1">into</span>(),
+            balances: database<span style="color: #f40064">.</span><span style="color: #0057d1">into</span>(),
+        }
+    })
+    <span style="color: #f40064">.</span><span style="color: #008c99">on_msg</span><span style="color: #f40064">::</span>&lt;BalanceOf>(|<span style="color: #a018ff">_env</span>, <span style="color: #a018ff">state</span>, <span style="color: #a018ff">address</span>| state<span style="color: #f40064">.</span>balances<span style="color: #f40064">.</span><span style="color: #0057d1">get</span>(<span style="color: #a018ff">&amp;</span>address))
+    <span style="color: #f40064">.</span><span style="color: #008c99">on_msg</span><span style="color: #f40064">::</span>&lt;TotalSupply>(|<span style="color: #a018ff">_env</span>, <span style="color: #a018ff">state</span>, ()| <span style="color: #a018ff">*</span>state<span style="color: #f40064">.</span>total)
+    <span style="color: #f40064">.</span><span style="color: #008c99">on_msg_mut</span><span style="color: #f40064">::</span>&lt;Transfer>(|<span style="color: #a018ff">env</span>, <span style="color: #a018ff">state</span>, (<span style="color: #a018ff">to</span>, <span style="color: #a018ff">amount</span>)| {
+        <span style="color: #d17c00">if</span> amount <span style="color: #a018ff">==</span> U256<span style="color: #f40064">::</span>zero() {
+            <span style="color: #d17c00">return</span> false;
+        }
+        <span style="color: #008c99">let</span> from <span style="color: #a018ff">=</span> env<span style="color: #f40064">.</span><span style="color: #0057d1">original_caller</span>();
+
+        <span style="color: #008c99">let</span> existing_from <span style="color: #a018ff">=</span> state<span style="color: #f40064">.</span>balances<span style="color: #f40064">.</span><span style="color: #0057d1">get</span>(<span style="color: #a018ff">&amp;</span>from);
+        <span style="color: #008c99">let</span> existing_to <span style="color: #a018ff">=</span> state<span style="color: #f40064">.</span>balances<span style="color: #f40064">.</span><span style="color: #0057d1">get</span>(<span style="color: #a018ff">&amp;</span>to);
+
+        <span style="color: #d17c00">if</span> existing_from <span style="color: #a018ff">>=</span> amount {
+            state<span style="color: #f40064">.</span>balances<span style="color: #f40064">.</span><span style="color: #0057d1">insert</span>(<span style="color: #a018ff">&amp;</span>from, existing_from <span style="color: #a018ff">-</span> amount);
+            state<span style="color: #f40064">.</span>balances<span style="color: #f40064">.</span><span style="color: #0057d1">insert</span>(<span style="color: #a018ff">&amp;</span>to, existing_to <span style="color: #a018ff">+</span> amount);
+
+            true
+        } <span style="color: #d17c00">else</span> {
+            false
+        }
+    })
+</code></pre></div><p>This is a reimplementation of the ERC20 contract given as an example in the tutorial for <a href="https://github.com/paritytech/pwasm-tutorial">our old API</a>. The “message” concept might seem a bit alien to you if you’re used to these being methods on a contract but they work the exact same way. The “message” language betrays one of the magic powers that this library has - abstracting different WebAssembly smart contract platforms away from you. Currently the only WebAssembly smart contract platform supported by Parity is the Kovan testnet, but the idea is that you will be able to write contracts that work on either Kovan, Ethereum mainnet (if and when that supports WebAssembly), Polkadot and our yet-to-be-announced proof-of-stake smart contract platform built on <a href="/what-is-substrate">Substrate</a>. If you need to use specific features of any particular network you can be explicit about that, and maybe enable or disable certain features or smart contract methods depending on whether the chain supports what those features require. This can be done entirely within the Rust trait system, and so you can find out whether your contract will work on a particular network without even attempting to compile your contract for that network. Our intention is that a smart contract can start its life on Kovan and then as more networks come to maturity you can move to them with little-to-no code changes, and any necessary code changes being guided by the compiler.</p><p>The “message” language is an abstraction of methods to include asynchronous methods - currently method calls in Ethereum and Kovan are synchronous but with a totally asynchronous smart contract platform you can have implicit parallelism and cheaper-and-better sharding without affecting correctness. Sharding Ethereum is artificially taxed with the requirement to maintain the existing synchronous semantics. The “message” concept supports both synchronous and actor-model asynchronous code, code written to accomodate asynchronous chains will work on Ethereum too but will be able to take advantage of future improvements in blockchain technology. We hope to reduce the difficulty of writing asynchronous code by allowing you to write synchronous-style code with the <a href="https://github.com/rust-lang-nursery/futures-rs"><code>futures</code></a> library. The <code>futures</code> library will be the backbone of Rust’s <code>async</code>/<code>await</code> syntax, which will allow code that needs conceptual synchronicity to be simple and ergonomic without sacrificing the benefits of asynchronicity.</p><p>Having said that, the current version of the library is still synchronous. Asynchronicity is a future goal but is not yet implemented. When it is implemented, Rust’s strong compile-time guarantees mean that you should just need to follow the compiler errors and add <code>await</code> where necessary. Even if we never take advantage of asynchronicity, the more modern smart contract platforms that our library is written to be compatible with will be significantly more efficient than Ethereum by virtue of a more-efficient consensus mechanism and a more-performant virtual machine.</p><p>For smart contracts that don’t need Ethereum’s more stable value and wide-reaching token supply (read: any blockchain project that isn’t an ICO) you could imagine that the improved performance of the more modern blockchains could be an <a href="https://hackernoon.com/startup-advice-build-for-your-unfair-advantage-f68efc61c599">“unfair advantage”</a> that other dApp developers can’t take advantage of without rebuilding their product from scratch. In the blockchain world, performance is even more important than in other software. The more performant your software is, the lower the price of using it. You can start deploying now and let the platform improve underneath you.</p><p>If you’re a developer and you care more about ergonomics and ease of use - since this library is just normal Rust code without any code generation or macro magic it works out-of-the-box with code completion using <a href="https://github.com/rust-lang-nursery/rls">RLS</a> and (as long as you don’t mind mocking out external contracts) immediate-feedback local testing with <code>cargo test</code>. Test-driven development - not impossible in Solidity but certainly difficult - can be done without even having a blockchain client installed at all, although if you want to interact with contracts not written in this library as part of your tests you will have to connect to a client. It’s possible that in the future we will embed an instance of the Ethereum virtual machine in order to allow you to include Solidity contracts as part of your tests.</p><p>I hope this short article gave you an idea of some of the business and process benefits of writing smart contracts in Rust. For some more developer-focussed benefits to writing smart contract code in Rust, I highly recommend you check out the <a href="/rust-smart-contracts">first article in this series</a>.</p></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>

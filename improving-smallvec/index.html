@@ -1,110 +1,716 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>Improving SmallVec&#39;s speed by 60% and why that shouldn&#39;t matter to you</title>
-    
-    <meta name="description" content="">
-    
-    <meta itemprop="name" content="Improving SmallVec&#39;s speed by 60% and why that shouldn&#39;t matter to you">
-    
-    
-    <meta name="og:title" content="Improving SmallVec&#39;s speed by 60% and why that shouldn&#39;t matter to you">
-    
-        <meta name="image" content="http://troubles.md/floppies.png">
-        <meta name="og:image" content="http://troubles.md/floppies.png">
-       <meta name="og:url" content="http://troubles.md/improving-smallvec/">
-    <meta name="og:site_name" content="Improving SmallVec&#39;s speed by 60% and why that shouldn&#39;t matter to you">
-    <meta name="og:type" content="article">
-    
-    <meta name="article:tag" content="">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/style.css">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/syntax.css">
-    <script async>
-        window.onload = function() {
-            var possibilities = [
-                 "A high-level view of low-level code",  "Writing words and reading DWORDS", 
-            ];
+<!DOCTYPE html><html><head><meta name="og:type" content="article"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="og:title" content="Improving SmallVec's speed by 60% and why that shouldn't matter to you"><meta itemprop="name" content="Improving SmallVec's speed by 60% and why that shouldn't matter to you"><meta name="image" content="floppies.png"><meta name="og:image" content="floppies.png"><title>Improving SmallVec's speed by 60% and why that shouldn't matter to you - troubles.md</title><style rel="stylesheet" type="text/css">@import url("https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square");
 
-            document.getElementById('subtitle').innerHTML = possibilities[Math.floor(possibilities.length * Math.random())];
-        };
-    </script>
-</head>
+/* Light theme by default */
+:root {
+    --main-header-font: "Bevan", monospace;
+    --secondary-header-font: "Sanchez", monospace;
+    --body-font: "Lato", sans-serif;
+    --code-font: "Cascadia Mono", monospace;
+    --default-inset: 11pt;
+    --expanded-inset: 20pt;
+    --title-inset: 28pt;
+    --background-color: #fff;
+    --header-font-color: #777;
+    --font-color: #000;
+    --pre-font-color: #333;
+    --date-color: #667;
+    --code-background-color: #f7f7f7;
+    --accent-color: #0594cb;
+}
 
-<body>
+@counter-style custom {
+    system: cyclic;
+    symbols: "┃";
+    suffix: " ";
+}
 
-<header>
-    
-    <span>
-        <a href="http://troubles.md/" class="title"><strong>troubles.md</strong></a>
-        <span class="dash"> - </span><p id="subtitle" class="subtitle">A high-level view of low-level code</p>
-        
-        
-    </span>
-    
-    <a class="rss" href="http://troubles.md/index.xml">
-        <strong>
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="feather feather-rss"
-            >
-                <path d="M4 11a9 9 0 0 1 9 9">
-                </path>
-                <path d="M4 4a16 16 0 0 1 16 16">
-                </path>
-                <circle cx="5" cy="19" r="1">
-                </circle>
-            </svg>
-        </strong>
-    </a>
-</header>
+.code-dark {
+    display: none;
+}
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #252525;
+        --header-font-color: #aaa;
+        --font-color: #eee;
+        --pre-font-color: #bababa;
+        --date-color: #999;
+        --code-background-color: #333;
+    }
 
-<div class="content">
-  <h1>Improving SmallVec&#39;s speed by 60% and why that shouldn&#39;t matter to you <aside></aside></h1>
-  <p><code>smallvec</code> is a library by the Servo team for reducing the number of allocations for dynamic arrays in the case that most of those arrays are below a certain size. For example, if you&rsquo;re creating a vector that normally has less than 100 items but could have more, you can reduce the load on the allocator by using a <code>SmallVec</code> like so:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">fn</span> <span class="nf">print_iterator</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">(</span><span class="n">i</span>: <span class="nc">T</span><span class="p">)</span><span class="w">
-</span><span class="w"></span><span class="k">where</span><span class="w">
-</span><span class="w">  </span><span class="n">T</span>: <span class="nb">Iterator</span><span class="p">,</span><span class="w">
-</span><span class="w">  </span><span class="n">T</span>::<span class="n">Item</span>: <span class="nc">Debug</span><span class="p">,</span><span class="w">
-</span><span class="w"></span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="c1">// Before...
-</span><span class="c1"></span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="n">vec</span>: <span class="nb">Vec</span><span class="o">&lt;</span><span class="n">T</span>::<span class="n">Item</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="p">.</span><span class="n">collect</span><span class="p">();</span><span class="w">
-</span><span class="w">  </span><span class="c1">// After
-</span><span class="c1"></span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="n">vec</span>: <span class="nc">SmallVec</span><span class="o">&lt;</span><span class="p">[</span><span class="n">T</span>::<span class="n">Item</span><span class="p">;</span><span class="w"> </span><span class="mi">100</span><span class="p">]</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="p">.</span><span class="n">collect</span><span class="p">();</span><span class="w">
-</span><span class="w">  
-</span><span class="w">  </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&#34;{:?}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">vec</span><span class="p">);</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>The implementation is conceptually very simple, essentially looking like the following:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="c1">// Implemented for `[T; 1]`, `[T; 2]`, etc.
-</span><span class="c1"></span><span class="k">trait</span><span class="w"> </span><span class="n">Array</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="k">type</span> <span class="nc">Item</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="k">fn</span> <span class="nf">ptr</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="n">Item</span><span class="p">;</span><span class="w">
-</span><span class="w">    </span><span class="k">fn</span> <span class="nf">ptr_mut</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">Item</span><span class="p">;</span><span class="w">
-</span><span class="w">    </span><span class="k">fn</span> <span class="nf">size</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">usize</span><span class="p">;</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="k">enum</span> <span class="nc">SmallVec</span><span class="o">&lt;</span><span class="n">T</span>: <span class="nc">Array</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="n">Inline</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="n">len</span>: <span class="kt">usize</span><span class="p">,</span><span class="w">
-</span><span class="w">        </span><span class="n">buffer</span>: <span class="nc">T</span><span class="p">,</span><span class="w">
-</span><span class="w">    </span><span class="p">},</span><span class="w">
-</span><span class="w">    </span><span class="n">Heap</span><span class="p">(</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">T</span>::<span class="n">Item</span><span class="o">&gt;</span><span class="p">),</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>The real implementation is more complex for optimisation purposes, but it&rsquo;s essentially what you see above. If the length is less than <code>T::size()</code> it will store the elements inline (on the stack), if it becomes larger than that then it will copy the elements onto the heap - incurring a cost to allocate and to copy the existing elements. The main benefits to this are <em>not</em> from avoiding allocation, but from better cache efficiency when you store <code>SmallVec</code> values in an array.</p>
-<p>Because <a href="http://voices.canonical.com/jussi.pakkanen/2011/09/27/is-malloc-slow/"><code>malloc</code> is fast</a>, for many cases it&rsquo;s actually slower to use <code>SmallVec</code> than just using <code>Vec</code> because the one-time cost of the initial allocation is dwarfed by the lifetime cost of <code>SmallVec</code>'s increased complexity. You can see that switching to <code>Vec</code> actually improves speed on many of <code>SmallVec</code>'s own benchmarks<sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>:</p>
-<pre><code> name                     smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup
+    footer img {
+        filter: invert();
+    }
+
+    .code-dark {
+        display: block;
+    }
+
+    .code-light {
+        display: none;
+    }
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--font-color);
+}
+
+body,
+li p {
+    font-family: var(--body-font), sans-serif;
+    letter-spacing: 0.15pt;
+    word-spacing: 0.08pt;
+    line-height: 1.8;
+}
+
+h2,
+h3 {
+    --line-width: 9pt;
+    --inset: var(--title-inset);
+
+    display: flex;
+    flex-direction: row;
+    background-color: var(--code-background-color);
+    border-left: var(--line-width) solid var(--accent-color);
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+    padding-left: calc(var(--inset) - var(--line-width));
+    padding-right: 0.6rem;
+    padding-bottom: 0.2rem;
+    margin-top: 2.1rem;
+    margin-bottom: 0.4rem;
+}
+
+h2 span,
+h3 span {
+    display: none;
+}
+
+h2 .section-title,
+h3 .section-title {
+    display: inline-block;
+}
+
+.section-link-postfix {
+    display: flex;
+
+    flex-direction: column;
+    justify-content: space-around;
+
+    font-family: var(--body-font);
+    font-size: 90%;
+    padding-left: 12pt;
+    margin-left: auto;
+}
+
+.section-link-postfix a {
+    opacity: 0.7;
+    color: var(--header-font-color);
+}
+
+h2 a span,
+h3 a span {
+    font-size: 18px;
+    color: var(--code-background-color);
+}
+
+h2 a span {
+    padding-top: 0.5rem;
+}
+
+h3 a span {
+    padding-top: 0.1rem;
+}
+
+h2 .section-link a:hover,
+h3 .section-link a:hover {
+    background-color: var(--accent-color);
+}
+
+h2 .section-link a:hover span,
+h3 .section-link a:hover span {
+    display: block;
+}
+
+a .section-link {
+    font-size: calc(100% * var(--font-perc));
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--secondary-header-font), serif;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+}
+
+a code {
+    color: var(--accent-color);
+}
+
+h1 {
+    font-family: var(--main-header-font), serif;
+    font-weight: normal;
+    letter-spacing: 1pt;
+    display: block;
+    font-size: 250%;
+    line-height: 1.2;
+    padding-top: 0.02em;
+    margin-top: 1em;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+h2 {
+    font-size: 170%;
+}
+
+h3 {
+    font-size: 120%;
+}
+
+.post-link {
+    margin-bottom: 1em;
+}
+
+.post-link a {
+    font-family: var(--secondary-header-font);
+    color: var(--font-color);
+}
+
+header .blog-name a {
+    font-family: "Nova Square";
+    font-size: 130%;
+    letter-spacing: 3pt;
+    color: var(--font-color);
+    border-right: 3px solid var(--accent-color);
+}
+
+@keyframes blink-cursor {
+    50% {
+        border-right: unset;
+    }
+}
+
+header .blog-name a:hover {
+    animation: blink-cursor 1s linear infinite;
+}
+
+header,
+header a {
+    color: var(--header-font-color);
+    text-decoration: none;
+}
+
+/* reset */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    height: 100%;
+}
+
+li:target {
+    background-color: var(--code-background-color);
+}
+
+body {
+    padding: 0rem 0em 0rem 0em;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "kern=1";
+    -moz-font-feature-settings: "kern" 1;
+    -webkit-font-feature-settings: "kern" 1;
+    -o-font-feature-settings: "kern" 1;
+    -ms-font-feature-settings: "kern" 1;
+    font-feature-settings: "kern" 1;
+
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "liga=1";
+    -moz-font-feature-settings: "liga" 1;
+    -webkit-font-feature-settings: "liga" 1;
+    -o-font-feature-settings: "liga" 1;
+    -ms-font-feature-settings: "liga" 1;
+    font-feature-settings: "liga" 1;
+}
+
+.spon {
+    width: 100%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 14px;
+    background-color: rgb(243, 243, 165);
+    border-left: 3px solid var(--font-color);
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    padding-left: 12px;
+    padding-top: 5px;
+}
+
+.attribution {
+    display: block;
+    font-size: 18px;
+    font-family: "Montserrat", sans-serif;
+    width: 100%;
+    line-height: 1.8;
+    margin-top: 5px;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+header {
+    --inset: var(--title-inset);
+
+    font-family: "Cascadia Mono";
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.2;
+    justify-content: space-between;
+    /*background-color: var(--code-background-color);*/
+    display: flex;
+    letter-spacing: 0.7pt;
+    align-items: center;
+    padding: 0.5rem var(--inset);
+    border-bottom: 0.1em solid var(--header-font-color);
+    margin-bottom: 1.5rem;
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+}
+
+header a:hover {
+    color: var(--header-font-color);
+}
+
+.blog-name {
+    font-weight: 900;
+    justify-self: start;
+}
+
+.tagline {
+    justify-self: end;
+    font-weight: 100;
+}
+
+.blog-name,
+.tagline {
+    margin-bottom: 0px;
+    text-decoration: none;
+}
+
+footer {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 180px;
+}
+
+footer img {
+    width: 30px;
+    height: 30px;
+}
+
+.footnotes li p {
+    display: inline;
+}
+
+.ft-return-link {
+    display: inline;
+    margin-left: 0.5em;
+}
+
+.title {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.title aside {
+    width: 100%;
+    text-align: right;
+}
+
+.post-link:first-of-type {
+    margin-top: 1rem;
+}
+
+.post-link {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.post-link aside {
+    min-width: 152px;
+}
+
+.post-link a {
+    padding-left: var(--default-inset);
+    margin-left: calc(-1 * var(--default-inset));
+    line-height: 1.6;
+    padding-right: 1.5rem;
+    flex-grow: 1;
+}
+
+aside {
+    font-family: "Lato", sans-serif;
+    font-size: 0.84rem;
+    align-self: center;
+    line-height: 1.4;
+    color: var(--date-color);
+    text-align: right;
+    margin-right: 1em;
+    text-wrap-mode: nowrap;
+}
+
+aside em {
+    font-size: 0.7rem;
+}
+
+p {
+    margin-bottom: 1em;
+}
+
+ul {
+    list-style: custom;
+}
+
+ul li::marker {
+    color: var(--accent-color);
+}
+
+ol li::marker {
+    color: var(--header-font-color);
+}
+
+li li::marker {
+    color: var(--date-color);
+}
+
+ul {
+    margin-bottom: 1em;
+}
+
+ul ul,
+ol ol {
+    margin-bottom: 0;
+    padding-left: 1em;
+}
+
+li p {
+    margin-bottom: 0;
+}
+
+li {
+    padding-left: 0.3em;
+    margin-left: 1em;
+    margin-bottom: 0.5em;
+}
+
+table {
+    margin-bottom: 1.5em;
+    border-collapse: collapse;
+    width: 95%;
+}
+
+table tr + tr {
+    border-top: 1px solid #ccc;
+}
+table td + td {
+    border-left: 1px solid #ccc;
+}
+
+table td {
+    padding: 0.4em;
+    text-align: center;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+table th {
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 95%;
+    padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+    line-height: 1.05;
+}
+
+img {
+    width: 100%;
+}
+
+a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+div.nav a:active div {
+    background: #cacaca;
+}
+
+a:active {
+    color: var(--header-font-color);
+}
+
+a:hover {
+    background: var(--code-background-color);
+}
+
+.post-link a:hover {
+    color: var(--date-color);
+}
+
+pre {
+    margin-left: var(--expanded-inset);
+    margin-right: var(--expanded-inset);
+    padding-left: 1.4em;
+    padding-top: 1em;
+    padding-bottom: 1em;
+    margin-bottom: 1em;
+    background-color: var(--code-background-color);
+    overflow: auto;
+    line-height: 1.5;
+    letter-spacing: -0.2pt;
+    border-left: 3.5px solid #bbb;
+    font-size: 85%;
+}
+
+code {
+    font-family: var(--code-font), monospace;
+    color: var(--pre-font-color);
+    display: inline-block;
+    max-width: 100%;
+    font-variant-ligatures: none;
+    text-rendering: auto;
+    -moz-font-feature-settings: "liga=0";
+    -moz-font-feature-settings: "liga" 0;
+    -webkit-font-feature-settings: "liga" 0;
+    -o-font-feature-settings: "liga" 0;
+    -ms-font-feature-settings: "liga" 0;
+    font-feature-settings: "liga" 0;
+}
+
+h1 > code,
+h2 > code,
+h3 > code,
+h4 > code,
+p > code {
+    display: inline-block;
+    text-transform: none;
+    padding-left: 0.1em;
+    padding-right: 0.1em;
+    font-size: 103%;
+    color: var(--pre-font-color);
+}
+
+figcaption {
+    font-weight: 400;
+    font-style: italic;
+    font-size: 0.7em/1.52;
+    line-height: 1.3;
+    color: #666665;
+    outline: 0;
+    z-index: 300;
+    text-align: center;
+}
+
+blockquote {
+    border-left: 3.5px solid var(--accent-color);
+    margin: 10px var(--expanded-inset);
+    padding: var(--default-inset) 20px;
+}
+
+blockquote p {
+    display: inline;
+}
+
+.content {
+    margin-bottom: 30px;
+}
+
+@media all {
+    html {
+        font-size: 18px;
+    }
+    .main {
+        margin-left: 7.5rem;
+        margin-right: 7.5rem;
+    }
+}
+@media all and (max-width: 1200px) {
+    pre {
+        margin-left: var(--default-inset);
+        margin-right: var(--default-inset);
+    }
+
+    blockquote {
+        margin: 0.7em var(--default-inset);
+    }
+}
+@media all and (max-width: 840px) {
+    h2,
+    h3 {
+        padding-left: var(--default-inset);
+        padding-right: var(--default-inset);
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    .post-link {
+        flex-direction: column-reverse;
+        justify-content: unset;
+    }
+
+    .post-link aside {
+        align-self: start;
+        text-align: left;
+    }
+
+    .title h1 {
+        text-align: center;
+    }
+
+    .main {
+        margin-left: 4rem;
+        margin-right: 4rem;
+    }
+}
+@media all and (max-width: 760px) {
+    .title h1 {
+        font-size: 24pt;
+    }
+
+    .main {
+        margin-left: 2.5rem;
+        margin-right: 2.5rem;
+    }
+}
+@media all and (max-width: 580px) {
+    .title h1 {
+        font-size: 20pt;
+    }
+
+    .tagline {
+        display: block;
+        font-size: 12px;
+    }
+
+    h2,
+    h3 {
+        --line-width: 4pt;
+        --inset: var(--default-inset);
+
+        margin-top: 0.4em;
+        padding-left: calc(var(--inset) - var(--line-width));
+    }
+
+    h2 .section-link,
+    h3 .section-link {
+        display: none;
+    }
+
+    h2 {
+        padding-top: 2pt;
+        font-size: 20pt;
+        padding-bottom: 2pt;
+    }
+
+    h3 {
+        font-size: 17pt;
+    }
+
+    aside.date-short {
+        display: none;
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    body,
+    li p {
+        line-height: 1.5;
+    }
+
+    header .separator {
+        visibility: collapse;
+    }
+
+    .main {
+        margin: 0 var(--default-inset);
+    }
+}
+</style></head><body><div class="main"><header><span class="blog-name"><a href="../index.html">troubles.md</a></span> <span class="tagline">Writing words and reading dwords</span></header><span></span><div class="content"><div class="title"><h1>Improving SmallVec's speed by 60% and why that shouldn't matter to you</h1><aside>17 May, 2018</aside></div><div class="post"><p><code>smallvec</code> is a library by the Servo team for reducing the number of allocations for dynamic arrays in the case that most of those arrays are below a certain size. For example, if you’re creating a vector that normally has less than 100 items but could have more, you can reduce the load on the allocator by using a <code>SmallVec</code> like so:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">print_iterator</span>&lt;T>(<span style="color: #bd5eff">i</span>: T)
+<span style="color: #ffbd5e">where</span>
+  T: Iterator,
+  <span style="color: #5ef1ff">T</span><span style="color: #ff5ea0">::</span>Item: Debug,
+{
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Before...</span>
+  <span style="color: #5ef1ff">let</span> vec: <span style="color: #bd5eff">Vec</span>&lt;<span style="color: #5ef1ff">T</span><span style="color: #ff5ea0">::</span>Item> <span style="color: #bd5eff">=</span> i<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">collect</span>();
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> After</span>
+  <span style="color: #5ef1ff">let</span> vec: SmallVec&lt;[<span style="color: #5ef1ff">T</span><span style="color: #ff5ea0">::</span>Item; 100]> <span style="color: #bd5eff">=</span> i<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">collect</span>();
+  
+  println!(<span style="color: #5eff6c">"</span>{:?}<span style="color: #5eff6c">"</span>, vec);
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">fn</span> <span style="color: #0057d1">print_iterator</span>&lt;T>(<span style="color: #a018ff">i</span>: T)
+<span style="color: #d17c00">where</span>
+  T: Iterator,
+  <span style="color: #008c99">T</span><span style="color: #f40064">::</span>Item: Debug,
+{
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Before...</span>
+  <span style="color: #008c99">let</span> vec: <span style="color: #a018ff">Vec</span>&lt;<span style="color: #008c99">T</span><span style="color: #f40064">::</span>Item> <span style="color: #a018ff">=</span> i<span style="color: #f40064">.</span><span style="color: #0057d1">collect</span>();
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> After</span>
+  <span style="color: #008c99">let</span> vec: SmallVec&lt;[<span style="color: #008c99">T</span><span style="color: #f40064">::</span>Item; 100]> <span style="color: #a018ff">=</span> i<span style="color: #f40064">.</span><span style="color: #0057d1">collect</span>();
+  
+  println!(<span style="color: #008b0c">"</span>{:?}<span style="color: #008b0c">"</span>, vec);
+}
+</code></pre></div><p>The implementation is conceptually very simple, essentially looking like the following:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #7b8496">//</span><span style="color: #7b8496"> Implemented for `[T; 1]`, `[T; 2]`, etc.</span>
+<span style="color: #5ef1ff">trait</span> Array {
+    <span style="color: #5ef1ff">type</span> Item;
+
+    <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">ptr</span>(<span style="color: #bd5eff">&amp;</span><span style="color: #bd5eff">self</span>) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #ff5ea0">*const</span><span style="color: #bd5eff"> Item</span>;
+    <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">ptr_mut</span>(<span style="color: #bd5eff">&amp;</span><span style="color: #bd5eff">self</span>) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #ff5ea0">*mut</span><span style="color: #bd5eff"> Item</span>;
+    <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">size</span>() <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #5ef1ff">usize</span>;
+}
+
+<span style="color: #5ef1ff">enum</span> SmallVec&lt;T: Array> {
+    Inline {
+        len: <span style="color: #5ef1ff">usize</span>,
+        buffer: T,
+    },
+    Heap(<span style="color: #bd5eff">Vec</span>&lt;<span style="color: #5ef1ff">T</span><span style="color: #ff5ea0">::</span>Item>),
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #7b8496">//</span><span style="color: #7b8496"> Implemented for `[T; 1]`, `[T; 2]`, etc.</span>
+<span style="color: #008c99">trait</span> Array {
+    <span style="color: #008c99">type</span> Item;
+
+    <span style="color: #008c99">fn</span> <span style="color: #0057d1">ptr</span>(<span style="color: #a018ff">&amp;</span><span style="color: #a018ff">self</span>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #f40064">*const</span><span style="color: #a018ff"> Item</span>;
+    <span style="color: #008c99">fn</span> <span style="color: #0057d1">ptr_mut</span>(<span style="color: #a018ff">&amp;</span><span style="color: #a018ff">self</span>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #f40064">*mut</span><span style="color: #a018ff"> Item</span>;
+    <span style="color: #008c99">fn</span> <span style="color: #0057d1">size</span>() <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #008c99">usize</span>;
+}
+
+<span style="color: #008c99">enum</span> SmallVec&lt;T: Array> {
+    Inline {
+        len: <span style="color: #008c99">usize</span>,
+        buffer: T,
+    },
+    Heap(<span style="color: #a018ff">Vec</span>&lt;<span style="color: #008c99">T</span><span style="color: #f40064">::</span>Item>),
+}
+</code></pre></div><p>The real implementation is more complex for optimisation purposes, but it’s essentially what you see above. If the length is less than <code>T::size()</code> it will store the elements inline (on the stack), if it becomes larger than that then it will copy the elements onto the heap - incurring a cost to allocate and to copy the existing elements. The main benefits to this are <em>not</em> from avoiding allocation, but from better cache efficiency when you store <code>SmallVec</code> values in an array.</p><p>Because <a href="http://voices.canonical.com/jussi.pakkanen/2011/09/27/is-malloc-slow/"><code>malloc</code> is fast</a>, for many cases it’s actually slower to use <code>SmallVec</code> than just using <code>Vec</code> because the one-time cost of the initial allocation is dwarfed by the lifetime cost of <code>SmallVec</code>’s increased complexity. You can see that switching to <code>Vec</code> actually improves speed on many of <code>SmallVec</code>’s own benchmarks <a id="ft-ref-7-1" href="#ft-note-7-1"><sup>1</sup></a> :</p><div class="code-dark"><pre><code> name                     smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup
  extend_from_slice        52                      65                           13   25.00%   x 0.80
  extend_from_slice_small  23                      29                            6   26.09%   x 0.79
  extend                   200                     69                         -131  -65.50%   x 2.90
@@ -119,231 +725,389 @@
  push_small               57                      53                           -4   -7.02%   x 1.08
  macro_from_list          47                      33                          -14  -29.79%   x 1.42
  pushpop                  306                     253                         -53  -17.32%   x 1.21
-</code></pre><p><code>Vec</code> is only slower for one method - <code>extend_from_slice</code>. Weirdly <code>SmallVec</code> is even faster in the case that <code>extend_from_slice</code> must allocate. From a cursory glance at the source code for <code>std</code> it looks like <code>SmallVec</code> might get an edge on inlining, since <code>Vec::extend_from_slice</code> isn&rsquo;t marked <code>#[inline]</code>.</p>
-<p>Even with the improvement on <code>extend_from_slice</code>, it&rsquo;s still a tough sell to use <code>SmallVec</code>. Even in the case where <code>SmallVec</code> is on the stack - the case where it&rsquo;s supposed to have an edge - it&rsquo;s still slower.</p>
-<p>Wait, though, isn&rsquo;t the only difference between the two the fact that <code>SmallVec</code> has to check whether it&rsquo;s inline or heap-allocated? Why is <code>from_elem</code> (which tests the <code>vec![val; N]</code> macro and the equivalent <code>smallvec![val; N]</code> macro) more than 5 times slower for <code>SmallVec</code>, and why is <code>extend</code> almost 3 times as slow, even being slower when it&rsquo;s on the stack? Well it turns out that apparently this library had some serious inefficiencies that are <em>not</em> inherent to the design. Let&rsquo;s check out what <code>SmallVec::from_elem</code> and <code>SmallVec::extend</code> look like:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">impl</span><span class="o">&lt;</span><span class="n">A</span>: <span class="nc">Array</span><span class="o">&gt;</span><span class="w"> </span><span class="n">SmallVec</span><span class="o">&lt;</span><span class="n">A</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">from_elem</span><span class="p">(</span><span class="n">elem</span>: <span class="nc">A</span>::<span class="n">Item</span><span class="p">,</span><span class="w"> </span><span class="n">n</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">Self</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SmallVec</span>::<span class="n">with_capacity</span><span class="p">(</span><span class="n">n</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="n">v</span><span class="p">.</span><span class="n">insert_many</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="n">n</span><span class="p">).</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">_</span><span class="o">|</span><span class="w"> </span><span class="n">elem</span><span class="p">.</span><span class="n">clone</span><span class="p">()));</span><span class="w">
-</span><span class="w">    </span><span class="n">v</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="c1">// ...
-</span><span class="c1"></span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="k">impl</span><span class="o">&lt;</span><span class="n">A</span>: <span class="nc">Array</span><span class="o">&gt;</span><span class="w"> </span><span class="nb">Extend</span><span class="o">&lt;</span><span class="n">A</span>::<span class="n">Item</span><span class="o">&gt;</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">SmallVec</span><span class="o">&lt;</span><span class="n">A</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="k">fn</span> <span class="nf">extend</span><span class="o">&lt;</span><span class="n">I</span><span class="o">&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">iterable</span>: <span class="nc">I</span><span class="p">)</span><span class="w">
-</span><span class="w">  </span><span class="k">where</span><span class="w">
-</span><span class="w">    </span><span class="n">I</span>: <span class="nb">IntoIterator</span><span class="o">&lt;</span><span class="n">Item</span><span class="o">=</span><span class="n">A</span>::<span class="n">Item</span><span class="o">&gt;</span><span class="w">
-</span><span class="w">  </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iterable</span><span class="p">.</span><span class="n">into_iter</span><span class="p">();</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">lower_size_bound</span><span class="p">,</span><span class="w"> </span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">size_hint</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">target_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">target_len</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">capacity</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">       </span><span class="bp">self</span><span class="p">.</span><span class="n">grow</span><span class="p">(</span><span class="n">target_len</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">elem</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">      </span><span class="bp">self</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">elem</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>Both seem pretty clear, for <code>extend</code> you reserve the expected number of elements and then do a <code>for</code> loop over the iterator, pushing each element to the new <code>SmallVec</code>. For <code>from_elem</code> you create a <code>SmallVec</code> preallocated with the number of elements you need and then insert <code>n</code> clones of <code>elem</code>. Hang on, though, what does the source code of <code>insert_many</code> look like?</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">impl</span><span class="o">&lt;</span><span class="n">A</span>: <span class="nc">Array</span><span class="o">&gt;</span><span class="w"> </span><span class="n">SmallVec</span><span class="o">&lt;</span><span class="n">A</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="c1">// ...
-</span><span class="c1"></span><span class="w">
-</span><span class="w">  </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">insert_many</span><span class="o">&lt;</span><span class="n">I</span>: <span class="nb">IntoIterator</span><span class="o">&lt;</span><span class="n">Item</span><span class="o">=</span><span class="n">A</span>::<span class="n">Item</span><span class="o">&gt;&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">index</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">iterable</span>: <span class="nc">I</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iterable</span><span class="p">.</span><span class="n">into_iter</span><span class="p">();</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">lower_size_bound</span><span class="p">,</span><span class="w"> </span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">size_hint</span><span class="p">();</span><span class="w">
-</span><span class="w">    </span><span class="n">assert</span><span class="o">!</span><span class="p">(</span><span class="n">lower_size_bound</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">std</span>::<span class="kt">isize</span>::<span class="n">MAX</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">);</span><span class="w">  </span><span class="c1">// Ensure offset is indexable
-</span><span class="c1"></span><span class="w">    </span><span class="n">assert</span><span class="o">!</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">index</span><span class="p">);</span><span class="w">  </span><span class="c1">// Protect against overflow
-</span><span class="c1"></span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">reserve</span><span class="p">(</span><span class="n">lower_size_bound</span><span class="p">);</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">      </span><span class="kd">let</span><span class="w"> </span><span class="n">old_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="p">;</span><span class="w">
-</span><span class="w">      </span><span class="n">assert</span><span class="o">!</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">old_len</span><span class="p">);</span><span class="w">
-</span><span class="w">      </span><span class="kd">let</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">as_mut_ptr</span><span class="p">().</span><span class="n">offset</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">);</span><span class="w">
-</span><span class="w">      </span><span class="n">ptr</span>::<span class="n">copy</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span><span class="w"> </span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">lower_size_bound</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w"> </span><span class="n">old_len</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">index</span><span class="p">);</span><span class="w">
-</span><span class="w">
-</span><span class="w">      </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">off</span><span class="p">,</span><span class="w"> </span><span class="n">element</span><span class="p">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">enumerate</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">off</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">          </span><span class="n">ptr</span>::<span class="n">write</span><span class="p">(</span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">off</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w"> </span><span class="n">element</span><span class="p">);</span><span class="w">
-</span><span class="w">          </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">
-</span><span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">          </span><span class="c1">// Iterator provided more elements than the hint.
-</span><span class="c1"></span><span class="w">          </span><span class="n">assert</span><span class="o">!</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">off</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">index</span><span class="p">);</span><span class="w">  </span><span class="c1">// Protect against overflow.
-</span><span class="c1"></span><span class="w">          </span><span class="bp">self</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">off</span><span class="p">,</span><span class="w"> </span><span class="n">element</span><span class="p">);</span><span class="w">
-</span><span class="w">        </span><span class="p">}</span><span class="w">
-</span><span class="w">      </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">      </span><span class="kd">let</span><span class="w"> </span><span class="n">num_added</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">old_len</span><span class="p">;</span><span class="w">
-</span><span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="n">num_added</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="c1">// Iterator provided fewer elements than the hint
-</span><span class="c1"></span><span class="w">        </span><span class="n">ptr</span>::<span class="n">copy</span><span class="p">(</span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">lower_size_bound</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w"> </span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">num_added</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w"> </span><span class="n">old_len</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">index</span><span class="p">);</span><span class="w">
-</span><span class="w">      </span><span class="p">}</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>Gah! That&rsquo;s a <em>lot</em> of code. Let&rsquo;s go through this bit-by-bit (I&rsquo;ve removed assertions to make the logic clearer):</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">lower_size_bound</span><span class="p">,</span><span class="w"> </span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">size_hint</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="bp">self</span><span class="p">.</span><span class="n">reserve</span><span class="p">(</span><span class="n">lower_size_bound</span><span class="p">);</span><span class="w">
-</span></code></pre></div><p>This reserves enough space for the iterator&rsquo;s self-reported lower bound on its number of produced elements. Well hang on, we already know that we have enough space since we just created it with <code>with_capacity</code> and then used an iterator with a fixed size. So this is useless. We don&rsquo;t need to reserve any more space.</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="kd">let</span><span class="w"> </span><span class="n">old_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="kd">let</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">as_mut_ptr</span><span class="p">().</span><span class="n">offset</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">);</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="n">ptr</span>::<span class="n">copy</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span><span class="w"> </span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">lower_size_bound</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w"> </span><span class="n">old_len</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">index</span><span class="p">);</span><span class="w">
-</span></code></pre></div><p>This optimistically copies any existing elements to the end of the array. This is because this function allows you to insert the new elements at any point - not just at the end - and so if there are existing elements it needs to move them first<sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup>. Again, these lines are useless. If we&rsquo;re calling this from <code>from_elem</code>, we <em>know</em> that both <code>self.len</code> and <code>index</code> are both 0, so this will always copy 0 bytes (a no-op). We still waste cycles figuring this out, though.</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">off</span><span class="p">,</span><span class="w"> </span><span class="n">element</span><span class="p">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">enumerate</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="n">off</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="n">ptr</span>::<span class="n">write</span><span class="p">(</span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">off</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w"> </span><span class="n">element</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">off</span><span class="p">,</span><span class="w"> </span><span class="n">element</span><span class="p">);</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>For every element we do a branch. This means that the compiler can&rsquo;t optimise this into a <a href="http://man7.org/linux/man-pages/man3/memcpy.3.html"><code>memcpy</code></a> (the fastest possible method of copying the bytes) because for each element we need to check whether or not we&rsquo;ve reached the lower size bound. Technically the compiler <em>could</em> optimise this by turning it into two loops (known as <a href="https://en.wikipedia.org/wiki/Loop_fission_and_fusion">loop fission</a>) and then noticing that the first loop is equivalent to a <code>memcpy</code>, but relying on it to do so is inadvisable because it requires multiple optimisation passes to be applied in the correct order. Again, when we&rsquo;re calling this function from <code>from_elem</code> we know that this can only ever go through the first branch and never the second, so this prevents optimisations and wastes time checking <code>off &lt; lower_size_bound</code> for no benefit.</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="kd">let</span><span class="w"> </span><span class="n">num_added</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">old_len</span><span class="p">;</span><span class="w">
-</span><span class="w"></span><span class="k">if</span><span class="w"> </span><span class="n">num_added</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="c1">// Iterator provided fewer elements than the hint
-</span><span class="c1"></span><span class="w">  </span><span class="n">ptr</span>::<span class="n">copy</span><span class="p">(</span><span class="w">
-</span><span class="w">    </span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">lower_size_bound</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w">
-</span><span class="w">    </span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">num_added</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">),</span><span class="w">
-</span><span class="w">    </span><span class="n">old_len</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">index</span><span class="w">
-</span><span class="w">  </span><span class="p">);</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>This is another branch that&rsquo;s always skipped when we&rsquo;re doing <code>from_elem</code>, since we know that the iterator produces the right amount of elements every time. More wasted cycles.</p>
-<p>I&rsquo;m not going to go line-by-line into precisely how <code>Vec</code> does it, but you can check out the code <a href="https://github.com/rust-lang/rust/blob/9e3432447a9c6386443acdf731d488c159be3f66/src/liballoc/vec.rs#L1561-L1662">here</a>. The important thing is that for many types it&rsquo;s about as fast as is reasonably possible. A <em>lot</em> of work has been put into optimising this and it shows. There is even a special method that uses the operating system&rsquo;s ability to return zeroed memory &ldquo;magically&rdquo; if the element you pass to the function is equal to 0 (i.e. <code>Vec</code> requests a pointer to zeroed memory and the OS returns a pointer to memory that it knows <em>should</em> be zeroed, but doesn&rsquo;t actually zero it until you try to access it). It only increases the vector&rsquo;s length once, after all elements have been added. This is much better than our method of increasing the vector&rsquo;s length by 1 each iteration of the loop because you only have to do one addition. The bigger the <code>Vec</code>, the bigger difference this will make. The biggest benefit is that it uses specialisation to use <code>memcpy</code> for any element that implements <code>Copy</code>. This means that when possible it will copy using SIMD.</p>
-<p>The optimisations that require specialisation are actually impossible to implement in <code>SmallVec</code> without requiring a nightly compiler, but it turns out that it doesn&rsquo;t matter. You can just reuse <code>Vec::from_elem</code> (which is what <code>vec![elem; n]</code> desugars to) when you know it&rsquo;s going to end up on the heap, and do a simple loop-and-write when you know it will be on the stack. Here&rsquo;s what that looks like:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">from_elem</span><span class="p">(</span><span class="n">elem</span>: <span class="nc">A</span>::<span class="n">Item</span><span class="p">,</span><span class="w"> </span><span class="n">n</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">Self</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">A</span>::<span class="n">size</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="n">vec</span><span class="o">!</span><span class="p">[</span><span class="n">elem</span><span class="p">;</span><span class="w"> </span><span class="n">n</span><span class="p">].</span><span class="n">into</span><span class="p">()</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">      </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">arr</span>: <span class="nc">A</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>::<span class="n">std</span>::<span class="n">mem</span>::<span class="n">uninitialized</span><span class="p">();</span><span class="w">
-</span><span class="w">      </span><span class="kd">let</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arr</span><span class="p">.</span><span class="n">ptr_mut</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w">      </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="mi">0</span><span class="p">..</span><span class="n">n</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span>::<span class="n">std</span>::<span class="n">ptr</span>::<span class="n">write</span><span class="p">(</span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">i</span><span class="p">),</span><span class="w"> </span><span class="n">elem</span><span class="p">.</span><span class="n">clone</span><span class="p">());</span><span class="w">
-</span><span class="w">      </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">      </span><span class="n">SmallVec</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="n">data</span>: <span class="nc">Inline</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">array</span>: <span class="nc">arr</span><span class="w"> </span><span class="p">},</span><span class="w">
-</span><span class="w">        </span><span class="n">len</span>: <span class="nc">n</span><span class="p">,</span><span class="w">
-</span><span class="w">      </span><span class="p">}</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>We don&rsquo;t need to use the OS&rsquo;s magical ability to conjure up zeroed memory when we&rsquo;re building things on the stack since that works at the granularity of a page - 4kb by default on Linux - and if you&rsquo;re creating an array that large then the cost of allocation is absolutely dwarfed by the cost of initialisation. LLVM can <a href="https://github.com/llvm-mirror/llvm/blob/master/lib/Transforms/Scalar/LoopIdiomRecognize.cpp">trivially optimise</a> the <code>for</code> loop into a <code>memcpy</code> and even a <code>memset</code> when <code>A::Item = u8</code> (the comment at the header of the file lists this optimisation as a <code>TODO</code> but if you look at the code you can see that it&rsquo;s already been implemented). We get all the benefits of <code>Vec</code>'s complex implementation with the only cost being a <code>n &gt; A::size()</code> check, which is especially cheap because <code>A::size()</code> is a constant. You can see the generated assembly <a href="https://gist.github.com/Vurich/2d180d83821fc4f129b176a9a0f1dc63">here</a>, I haven&rsquo;t commented it because of the sheer amount of code that was generated before, but just the difference in the amount of code should make it clear that this method is significantly more efficient.</p>
-<p>After this, we see a huge improvement:</p>
-<pre><code> name             smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup 
+</code></pre></div><div class="code-light"><pre><code> name                     smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup
+ extend_from_slice        52                      65                           13   25.00%   x 0.80
+ extend_from_slice_small  23                      29                            6   26.09%   x 0.79
+ extend                   200                     69                         -131  -65.50%   x 2.90
+ extend_small             39                      28                          -11  -28.21%   x 1.39
+ from_slice               199                     36                         -163  -81.91%   x 5.53
+ from_slice_small         38                      30                           -8  -21.05%   x 1.27
+ insert                   1,222                   1,231                         9    0.74%   x 0.99
+ insert_small             121                     114                          -7   -5.79%   x 1.06
+ macro_from_elem          218                     40                         -178  -81.65%   x 5.45
+ macro_from_elem_small    60                      32                          -28  -46.67%   x 1.88
+ push                     357                     369                          12    3.36%   x 0.97
+ push_small               57                      53                           -4   -7.02%   x 1.08
+ macro_from_list          47                      33                          -14  -29.79%   x 1.42
+ pushpop                  306                     253                         -53  -17.32%   x 1.21
+</code></pre></div><p><code>Vec</code> is only slower for one method - <code>extend_from_slice</code>. Weirdly <code>SmallVec</code> is even faster in the case that <code>extend_from_slice</code> must allocate. From a cursory glance at the source code for <code>std</code> it looks like <code>SmallVec</code> might get an edge on inlining, since <code>Vec::extend_from_slice</code> isn’t marked <code>#[inline]</code>.</p><p>Even with the improvement on <code>extend_from_slice</code>, it’s still a tough sell to use <code>SmallVec</code>. Even in the case where <code>SmallVec</code> is on the stack - the case where it’s supposed to have an edge - it’s still slower.</p><p>Wait, though, isn’t the only difference between the two the fact that <code>SmallVec</code> has to check whether it’s inline or heap-allocated? Why is <code>from_elem</code> (which tests the <code>vec![val; N]</code> macro and the equivalent <code>smallvec![val; N]</code> macro) more than 5 times slower for <code>SmallVec</code>, and why is <code>extend</code> almost 3 times as slow, even being slower when it’s on the stack? Well it turns out that apparently this library had some serious inefficiencies that are <em>not</em> inherent to the design. Let’s check out what <code>SmallVec::from_elem</code> and <code>SmallVec::extend</code> look like:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">impl</span>&lt;A: Array> SmallVec&lt;A> {
+  <span style="color: #ff5ea0">pub</span> <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">from_elem</span>(<span style="color: #bd5eff">elem</span>: <span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item, <span style="color: #bd5eff">n</span>: <span style="color: #5ef1ff">usize</span>) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #5ef1ff">Self</span> {
+    <span style="color: #5ef1ff">let</span> <span style="color: #ff5ea0">mut</span> v <span style="color: #bd5eff">=</span> <span style="color: #5ef1ff">SmallVec</span><span style="color: #ff5ea0">::</span>with_capacity(n);
+    v<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">insert_many</span>(0, (0<span style="color: #bd5eff">..</span>n)<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">map</span>(|_| elem<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">clone</span>()));
+    v
+  }
+
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> ...</span>
+}
+
+<span style="color: #5ef1ff">impl</span>&lt;A: Array> <span style="color: #bd5eff">Extend</span>&lt;<span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item> <span style="color: #ffbd5e">for</span> SmallVec&lt;A> {
+  <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">extend</span>&lt;I>(<span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> <span style="color: #bd5eff">self</span>, <span style="color: #bd5eff">iterable</span>: I)
+  <span style="color: #ffbd5e">where</span>
+    I: <span style="color: #bd5eff">IntoIterator</span>&lt;Item=<span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item>
+  {
+    <span style="color: #5ef1ff">let</span> iter <span style="color: #bd5eff">=</span> iterable<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into_iter</span>();
+    <span style="color: #5ef1ff">let</span> (lower_size_bound, <span style="color: #bd5eff">_</span>) <span style="color: #bd5eff">=</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">size_hint</span>();
+
+    <span style="color: #5ef1ff">let</span> target_len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">+</span> lower_size_bound;
+
+    <span style="color: #ffbd5e">if</span> target_len <span style="color: #bd5eff">></span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">capacity</span>() {
+       <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">grow</span>(target_len);
+    }
+
+    <span style="color: #ffbd5e">for</span> elem <span style="color: #bd5eff">in</span> iter {
+      <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">push</span>(elem);
+    }
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">impl</span>&lt;A: Array> SmallVec&lt;A> {
+  <span style="color: #f40064">pub</span> <span style="color: #008c99">fn</span> <span style="color: #0057d1">from_elem</span>(<span style="color: #a018ff">elem</span>: <span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item, <span style="color: #a018ff">n</span>: <span style="color: #008c99">usize</span>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #008c99">Self</span> {
+    <span style="color: #008c99">let</span> <span style="color: #f40064">mut</span> v <span style="color: #a018ff">=</span> <span style="color: #008c99">SmallVec</span><span style="color: #f40064">::</span>with_capacity(n);
+    v<span style="color: #f40064">.</span><span style="color: #0057d1">insert_many</span>(0, (0<span style="color: #a018ff">..</span>n)<span style="color: #f40064">.</span><span style="color: #0057d1">map</span>(|_| elem<span style="color: #f40064">.</span><span style="color: #0057d1">clone</span>()));
+    v
+  }
+
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> ...</span>
+}
+
+<span style="color: #008c99">impl</span>&lt;A: Array> <span style="color: #a018ff">Extend</span>&lt;<span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item> <span style="color: #d17c00">for</span> SmallVec&lt;A> {
+  <span style="color: #008c99">fn</span> <span style="color: #0057d1">extend</span>&lt;I>(<span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> <span style="color: #a018ff">self</span>, <span style="color: #a018ff">iterable</span>: I)
+  <span style="color: #d17c00">where</span>
+    I: <span style="color: #a018ff">IntoIterator</span>&lt;Item=<span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item>
+  {
+    <span style="color: #008c99">let</span> iter <span style="color: #a018ff">=</span> iterable<span style="color: #f40064">.</span><span style="color: #0057d1">into_iter</span>();
+    <span style="color: #008c99">let</span> (lower_size_bound, <span style="color: #a018ff">_</span>) <span style="color: #a018ff">=</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">size_hint</span>();
+
+    <span style="color: #008c99">let</span> target_len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">+</span> lower_size_bound;
+
+    <span style="color: #d17c00">if</span> target_len <span style="color: #a018ff">></span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">capacity</span>() {
+       <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">grow</span>(target_len);
+    }
+
+    <span style="color: #d17c00">for</span> elem <span style="color: #a018ff">in</span> iter {
+      <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">push</span>(elem);
+    }
+  }
+}
+</code></pre></div><p>Both seem pretty clear, for <code>extend</code> you reserve the expected number of elements and then do a <code>for</code> loop over the iterator, pushing each element to the new <code>SmallVec</code>. For <code>from_elem</code> you create a <code>SmallVec</code> preallocated with the number of elements you need and then insert <code>n</code> clones of <code>elem</code>. Hang on, though, what does the source code of <code>insert_many</code> look like?</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">impl</span>&lt;A: Array> SmallVec&lt;A> {
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> ...</span>
+
+  <span style="color: #ff5ea0">pub</span> <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">insert_many</span>&lt;I: <span style="color: #bd5eff">IntoIterator</span>&lt;Item=<span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item>>(<span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> <span style="color: #bd5eff">self</span>, <span style="color: #bd5eff">index</span>: <span style="color: #5ef1ff">usize</span>, <span style="color: #bd5eff">iterable</span>: I) {
+    <span style="color: #5ef1ff">let</span> iter <span style="color: #bd5eff">=</span> iterable<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into_iter</span>();
+    <span style="color: #5ef1ff">let</span> (lower_size_bound, <span style="color: #bd5eff">_</span>) <span style="color: #bd5eff">=</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">size_hint</span>();
+    assert!(lower_size_bound <span style="color: #bd5eff">&lt;=</span> <span style="color: #5ef1ff">std</span><span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">isize</span><span style="color: #ff5ea0">::</span>MAX <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">usize</span>);  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Ensure offset is indexable</span>
+    assert!(index <span style="color: #bd5eff">+</span> lower_size_bound <span style="color: #bd5eff">>=</span> index);  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Protect against overflow</span>
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">reserve</span>(lower_size_bound);
+
+    <span style="color: #ff5ea0">unsafe</span> {
+      <span style="color: #5ef1ff">let</span> old_len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len;
+      assert!(index <span style="color: #bd5eff">&lt;=</span> old_len);
+      <span style="color: #5ef1ff">let</span> ptr <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">as_mut_ptr</span>()<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(index <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>);
+      <span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>copy(ptr, ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(lower_size_bound <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>), old_len <span style="color: #bd5eff">-</span> index);
+
+      <span style="color: #ffbd5e">for</span> (off, element) <span style="color: #bd5eff">in</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">enumerate</span>() {
+        <span style="color: #ffbd5e">if</span> off <span style="color: #bd5eff">&lt;</span> lower_size_bound {
+          <span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>write(ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(off <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>), element);
+          <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">+</span> 1;
+        } <span style="color: #ffbd5e">else</span> {
+          <span style="color: #7b8496">//</span><span style="color: #7b8496"> Iterator provided more elements than the hint.</span>
+          assert!(index <span style="color: #bd5eff">+</span> off <span style="color: #bd5eff">>=</span> index);  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Protect against overflow.</span>
+          <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">insert</span>(index <span style="color: #bd5eff">+</span> off, element);
+        }
+      }
+
+      <span style="color: #5ef1ff">let</span> num_added <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">-</span> old_len;
+      <span style="color: #ffbd5e">if</span> num_added <span style="color: #bd5eff">&lt;</span> lower_size_bound {
+        <span style="color: #7b8496">//</span><span style="color: #7b8496"> Iterator provided fewer elements than the hint</span>
+        <span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>copy(ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(lower_size_bound <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>), ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(num_added <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>), old_len <span style="color: #bd5eff">-</span> index);
+      }
+    }
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">impl</span>&lt;A: Array> SmallVec&lt;A> {
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> ...</span>
+
+  <span style="color: #f40064">pub</span> <span style="color: #008c99">fn</span> <span style="color: #0057d1">insert_many</span>&lt;I: <span style="color: #a018ff">IntoIterator</span>&lt;Item=<span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item>>(<span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> <span style="color: #a018ff">self</span>, <span style="color: #a018ff">index</span>: <span style="color: #008c99">usize</span>, <span style="color: #a018ff">iterable</span>: I) {
+    <span style="color: #008c99">let</span> iter <span style="color: #a018ff">=</span> iterable<span style="color: #f40064">.</span><span style="color: #0057d1">into_iter</span>();
+    <span style="color: #008c99">let</span> (lower_size_bound, <span style="color: #a018ff">_</span>) <span style="color: #a018ff">=</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">size_hint</span>();
+    assert!(lower_size_bound <span style="color: #a018ff">&lt;=</span> <span style="color: #008c99">std</span><span style="color: #f40064">::</span><span style="color: #008c99">isize</span><span style="color: #f40064">::</span>MAX <span style="color: #a018ff">as</span> <span style="color: #008c99">usize</span>);  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Ensure offset is indexable</span>
+    assert!(index <span style="color: #a018ff">+</span> lower_size_bound <span style="color: #a018ff">>=</span> index);  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Protect against overflow</span>
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">reserve</span>(lower_size_bound);
+
+    <span style="color: #f40064">unsafe</span> {
+      <span style="color: #008c99">let</span> old_len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len;
+      assert!(index <span style="color: #a018ff">&lt;=</span> old_len);
+      <span style="color: #008c99">let</span> ptr <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">as_mut_ptr</span>()<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(index <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>);
+      <span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>copy(ptr, ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(lower_size_bound <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>), old_len <span style="color: #a018ff">-</span> index);
+
+      <span style="color: #d17c00">for</span> (off, element) <span style="color: #a018ff">in</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">enumerate</span>() {
+        <span style="color: #d17c00">if</span> off <span style="color: #a018ff">&lt;</span> lower_size_bound {
+          <span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>write(ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(off <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>), element);
+          <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">+</span> 1;
+        } <span style="color: #d17c00">else</span> {
+          <span style="color: #7b8496">//</span><span style="color: #7b8496"> Iterator provided more elements than the hint.</span>
+          assert!(index <span style="color: #a018ff">+</span> off <span style="color: #a018ff">>=</span> index);  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Protect against overflow.</span>
+          <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">insert</span>(index <span style="color: #a018ff">+</span> off, element);
+        }
+      }
+
+      <span style="color: #008c99">let</span> num_added <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">-</span> old_len;
+      <span style="color: #d17c00">if</span> num_added <span style="color: #a018ff">&lt;</span> lower_size_bound {
+        <span style="color: #7b8496">//</span><span style="color: #7b8496"> Iterator provided fewer elements than the hint</span>
+        <span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>copy(ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(lower_size_bound <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>), ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(num_added <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>), old_len <span style="color: #a018ff">-</span> index);
+      }
+    }
+  }
+}
+</code></pre></div><p>Gah! That’s a <em>lot</em> of code. Let’s go through this bit-by-bit (I’ve removed assertions to make the logic clearer):</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">let</span> (lower_size_bound, <span style="color: #bd5eff">_</span>) <span style="color: #bd5eff">=</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">size_hint</span>();
+
+<span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">reserve</span>(lower_size_bound);
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">let</span> (lower_size_bound, <span style="color: #a018ff">_</span>) <span style="color: #a018ff">=</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">size_hint</span>();
+
+<span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">reserve</span>(lower_size_bound);
+</code></pre></div><p>This reserves enough space for the iterator’s self-reported lower bound on its number of produced elements. Well hang on, we already know that we have enough space since we just created it with <code>with_capacity</code> and then used an iterator with a fixed size. So this is useless. We don’t need to reserve any more space.</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">let</span> old_len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len;
+
+<span style="color: #5ef1ff">let</span> ptr <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">as_mut_ptr</span>()<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(index <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>);
+
+<span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>copy(ptr, ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(lower_size_bound <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>), old_len <span style="color: #bd5eff">-</span> index);
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">let</span> old_len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len;
+
+<span style="color: #008c99">let</span> ptr <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">as_mut_ptr</span>()<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(index <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>);
+
+<span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>copy(ptr, ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(lower_size_bound <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>), old_len <span style="color: #a018ff">-</span> index);
+</code></pre></div><p>This optimistically copies any existing elements to the end of the array. This is because this function allows you to insert the new elements at any point - not just at the end - and so if there are existing elements it needs to move them first <a id="ft-ref-7-2" href="#ft-note-7-2"><sup>2</sup></a> . Again, these lines are useless. If we’re calling this from <code>from_elem</code>, we <em>know</em> that both <code>self.len</code> and <code>index</code> are both 0, so this will always copy 0 bytes (a no-op). We still waste cycles figuring this out, though.</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ffbd5e">for</span> (off, element) <span style="color: #bd5eff">in</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">enumerate</span>() {
+  <span style="color: #ffbd5e">if</span> off <span style="color: #bd5eff">&lt;</span> lower_size_bound {
+    <span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>write(ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(off <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>), element);
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">+</span> 1;
+  } <span style="color: #ffbd5e">else</span> {
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">insert</span>(index <span style="color: #bd5eff">+</span> off, element);
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #d17c00">for</span> (off, element) <span style="color: #a018ff">in</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">enumerate</span>() {
+  <span style="color: #d17c00">if</span> off <span style="color: #a018ff">&lt;</span> lower_size_bound {
+    <span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>write(ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(off <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>), element);
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">+</span> 1;
+  } <span style="color: #d17c00">else</span> {
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">insert</span>(index <span style="color: #a018ff">+</span> off, element);
+  }
+}
+</code></pre></div><p>For every element we do a branch. This means that the compiler can’t optimise this into a <a href="http://man7.org/linux/man-pages/man3/memcpy.3.html"><code>memcpy</code></a> (the fastest possible method of copying the bytes) because for each element we need to check whether or not we’ve reached the lower size bound. Technically the compiler <em>could</em> optimise this by turning it into two loops (known as <a href="https://en.wikipedia.org/wiki/Loop_fission_and_fusion">loop fission</a>) and then noticing that the first loop is equivalent to a <code>memcpy</code>, but relying on it to do so is inadvisable because it requires multiple optimisation passes to be applied in the correct order. Again, when we’re calling this function from <code>from_elem</code> we know that this can only ever go through the first branch and never the second, so this prevents optimisations and wastes time checking <code>off &lt; lower_size_bound</code> for no benefit.</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">let</span> num_added <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">-</span> old_len;
+<span style="color: #ffbd5e">if</span> num_added <span style="color: #bd5eff">&lt;</span> lower_size_bound {
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Iterator provided fewer elements than the hint</span>
+  <span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>copy(
+    ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(lower_size_bound <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>),
+    ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(num_added <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>),
+    old_len <span style="color: #bd5eff">-</span> index
+  );
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">let</span> num_added <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">-</span> old_len;
+<span style="color: #d17c00">if</span> num_added <span style="color: #a018ff">&lt;</span> lower_size_bound {
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> Iterator provided fewer elements than the hint</span>
+  <span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>copy(
+    ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(lower_size_bound <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>),
+    ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(num_added <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>),
+    old_len <span style="color: #a018ff">-</span> index
+  );
+}
+</code></pre></div><p>This is another branch that’s always skipped when we’re doing <code>from_elem</code>, since we know that the iterator produces the right amount of elements every time. More wasted cycles.</p><p>I’m not going to go line-by-line into precisely how <code>Vec</code> does it, but you can check out the code <a href="https://github.com/rust-lang/rust/blob/9e3432447a9c6386443acdf731d488c159be3f66/src/liballoc/vec.rs#L1561-L1662">here</a>. The important thing is that for many types it’s about as fast as is reasonably possible. A <em>lot</em> of work has been put into optimising this and it shows. There is even a special method that uses the operating system’s ability to return zeroed memory “magically” if the element you pass to the function is equal to 0 (i.e. <code>Vec</code> requests a pointer to zeroed memory and the OS returns a pointer to memory that it knows <em>should</em> be zeroed, but doesn’t actually zero it until you try to access it). It only increases the vector’s length once, after all elements have been added. This is much better than our method of increasing the vector’s length by 1 each iteration of the loop because you only have to do one addition. The bigger the <code>Vec</code>, the bigger difference this will make. The biggest benefit is that it uses specialisation to use <code>memcpy</code> for any element that implements <code>Copy</code>. This means that when possible it will copy using SIMD.</p><p>The optimisations that require specialisation are actually impossible to implement in <code>SmallVec</code> without requiring a nightly compiler, but it turns out that it doesn’t matter. You can just reuse <code>Vec::from_elem</code> (which is what <code>vec![elem; n]</code> desugars to) when you know it’s going to end up on the heap, and do a simple loop-and-write when you know it will be on the stack. Here’s what that looks like:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ff5ea0">pub</span> <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">from_elem</span>(<span style="color: #bd5eff">elem</span>: <span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item, <span style="color: #bd5eff">n</span>: <span style="color: #5ef1ff">usize</span>) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #5ef1ff">Self</span> {
+  <span style="color: #ffbd5e">if</span> n <span style="color: #bd5eff">></span> <span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>size() {
+    vec![elem; n]<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into</span>()
+  } <span style="color: #ffbd5e">else</span> {
+    <span style="color: #ff5ea0">unsafe</span> {
+      <span style="color: #5ef1ff">let</span> <span style="color: #ff5ea0">mut</span> arr: A <span style="color: #bd5eff">=</span> <span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">std</span><span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">mem</span><span style="color: #ff5ea0">::</span>uninitialized();
+      <span style="color: #5ef1ff">let</span> ptr <span style="color: #bd5eff">=</span> arr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">ptr_mut</span>();
+
+      <span style="color: #ffbd5e">for</span> i <span style="color: #bd5eff">in</span> 0<span style="color: #bd5eff">..</span>n <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span> {
+        <span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">std</span><span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>write(ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(i), elem<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">clone</span>());
+      }
+
+      SmallVec {
+        data: Inline { array: arr },
+        len: n,
+      }
+    }
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #f40064">pub</span> <span style="color: #008c99">fn</span> <span style="color: #0057d1">from_elem</span>(<span style="color: #a018ff">elem</span>: <span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item, <span style="color: #a018ff">n</span>: <span style="color: #008c99">usize</span>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #008c99">Self</span> {
+  <span style="color: #d17c00">if</span> n <span style="color: #a018ff">></span> <span style="color: #008c99">A</span><span style="color: #f40064">::</span>size() {
+    vec![elem; n]<span style="color: #f40064">.</span><span style="color: #0057d1">into</span>()
+  } <span style="color: #d17c00">else</span> {
+    <span style="color: #f40064">unsafe</span> {
+      <span style="color: #008c99">let</span> <span style="color: #f40064">mut</span> arr: A <span style="color: #a018ff">=</span> <span style="color: #f40064">::</span><span style="color: #008c99">std</span><span style="color: #f40064">::</span><span style="color: #008c99">mem</span><span style="color: #f40064">::</span>uninitialized();
+      <span style="color: #008c99">let</span> ptr <span style="color: #a018ff">=</span> arr<span style="color: #f40064">.</span><span style="color: #0057d1">ptr_mut</span>();
+
+      <span style="color: #d17c00">for</span> i <span style="color: #a018ff">in</span> 0<span style="color: #a018ff">..</span>n <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span> {
+        <span style="color: #f40064">::</span><span style="color: #008c99">std</span><span style="color: #f40064">::</span><span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>write(ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(i), elem<span style="color: #f40064">.</span><span style="color: #0057d1">clone</span>());
+      }
+
+      SmallVec {
+        data: Inline { array: arr },
+        len: n,
+      }
+    }
+  }
+}
+</code></pre></div><p>We don’t need to use the OS’s magical ability to conjure up zeroed memory when we’re building things on the stack since that works at the granularity of a page - 4kb by default on Linux - and if you’re creating an array that large then the cost of allocation is absolutely dwarfed by the cost of initialisation. LLVM can <a href="https://github.com/llvm-mirror/llvm/blob/master/lib/Transforms/Scalar/LoopIdiomRecognize.cpp">trivially optimise</a> the <code>for</code> loop into a <code>memcpy</code> and even a <code>memset</code> when <code>A::Item = u8</code> (the comment at the header of the file lists this optimisation as a <code>TODO</code> but if you look at the code you can see that it’s already been implemented). We get all the benefits of <code>Vec</code>’s complex implementation with the only cost being a <code>n > A::size()</code> check, which is especially cheap because <code>A::size()</code> is a constant. You can see the generated assembly <a href="https://gist.github.com/Vurich/2d180d83821fc4f129b176a9a0f1dc63">here</a>, I haven’t commented it because of the sheer amount of code that was generated before, but just the difference in the amount of code should make it clear that this method is significantly more efficient.</p><p>After this, we see a huge improvement:</p><div class="code-dark"><pre><code> name             smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup 
  macro_from_elem  66                      50                 -16            -24.24%   x 1.32 
-</code></pre><p><code>Vec</code> is still faster, but now the difference is only 16ns instead of 130ns. I do wonder if there&rsquo;s some way to speed up the conversion from <code>Vec</code> to <code>SmallVec</code>, because that&rsquo;s the only place that the difference could be coming from and it should be essentially instant.</p>
-<p>Now for the fun one. Let&rsquo;s see <code>SmallVec::extend</code> again:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">impl</span><span class="o">&lt;</span><span class="n">A</span>: <span class="nc">Array</span><span class="o">&gt;</span><span class="w"> </span><span class="nb">Extend</span><span class="o">&lt;</span><span class="n">A</span>::<span class="n">Item</span><span class="o">&gt;</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">SmallVec</span><span class="o">&lt;</span><span class="n">A</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="k">fn</span> <span class="nf">extend</span><span class="o">&lt;</span><span class="n">I</span><span class="o">&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">iterable</span>: <span class="nc">I</span><span class="p">)</span><span class="w">
-</span><span class="w">  </span><span class="k">where</span><span class="w">
-</span><span class="w">    </span><span class="n">I</span>: <span class="nb">IntoIterator</span><span class="o">&lt;</span><span class="n">Item</span><span class="o">=</span><span class="n">A</span>::<span class="n">Item</span><span class="o">&gt;</span><span class="w">
-</span><span class="w">  </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iterable</span><span class="p">.</span><span class="n">into_iter</span><span class="p">();</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">lower_size_bound</span><span class="p">,</span><span class="w"> </span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">size_hint</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">target_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">target_len</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">capacity</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">       </span><span class="bp">self</span><span class="p">.</span><span class="n">grow</span><span class="p">(</span><span class="n">target_len</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">elem</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">      </span><span class="bp">self</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">elem</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>So what&rsquo;s wrong with this? Well, let&rsquo;s take a look at the source of <code>push</code>:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">push</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">value</span>: <span class="nc">A</span>::<span class="n">Item</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="n">cap</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">capacity</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">cap</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">grow</span><span class="p">(</span><span class="n">cmp</span>::<span class="n">max</span><span class="p">(</span><span class="n">cap</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">))</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">as_mut_ptr</span><span class="p">()</span><span class="w">
-</span><span class="w">      </span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">);</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="n">ptr</span>::<span class="n">write</span><span class="p">(</span><span class="n">end</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="p">;</span><span class="w">
-</span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">set_len</span><span class="p">(</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>It&rsquo;s the same problem again - we know that we don&rsquo;t need to grow for the first <code>lower_size_bound</code> iterations (because we already preallocated that many elements) but we do anyway. Plus we&rsquo;re making LLVM&rsquo;s job hard - it <em>could</em> figure out that because we set <code>self.capacity</code> and then check it against <code>self.len</code> in each iteration of the loop then it can split the loop in two and omit the check for the first <code>self.capacity - self.len</code> iterations, and then from <em>that</em> figure out that the writes can be vectorised, but it&rsquo;s again relying on a specific set of optimisations in a specific order. Also, we store to <code>self.len</code> every iteration of the loop and although LLVM could load <code>self.len</code> to a register, increment it there, and then store it again, that is not a simple enough optimisation for us to expect it to be reliably performed. Besides, that optimisation cannot be performed for an iterator that may panic, since in that case we need to ensure that <code>self.len</code> is correct after each iteration of the loop. This is because other code could observe it after the panic (even without <code>catch_panic</code>, code in implementations of <code>Drop::drop</code> could observe it). We can do this optimisation ourself and make the code easier to understand by LLVM:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">fn</span> <span class="nf">extend</span><span class="o">&lt;</span><span class="n">I</span><span class="o">&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">iterable</span>: <span class="nc">I</span><span class="p">)</span><span class="w">
-</span><span class="w"></span><span class="k">where</span><span class="w">
-</span><span class="w">  </span><span class="n">I</span>: <span class="nb">IntoIterator</span><span class="o">&lt;</span><span class="n">Item</span><span class="o">=</span><span class="n">A</span>::<span class="n">Item</span><span class="o">&gt;</span><span class="w">
-</span><span class="w"></span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iterable</span><span class="p">.</span><span class="n">into_iter</span><span class="p">();</span><span class="w">
-</span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">lower_size_bound</span><span class="p">,</span><span class="w"> </span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">size_hint</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="n">target_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">lower_size_bound</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="n">target_len</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">capacity</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">grow</span><span class="p">(</span><span class="n">target_len</span><span class="p">);</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="c1">// This section is new
-</span><span class="c1"></span><span class="w">  </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">as_mut_ptr</span><span class="p">()</span><span class="w">
-</span><span class="w">      </span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="p">);</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">len</span><span class="p">();</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">
-</span><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="mi">0</span><span class="p">..</span><span class="n">lower_size_bound</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">iter</span><span class="p">.</span><span class="n">next</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span>::<span class="n">std</span>::<span class="n">ptr</span>::<span class="n">write</span><span class="p">(</span><span class="n">ptr</span><span class="p">.</span><span class="n">offset</span><span class="p">(</span><span class="n">p</span><span class="p">),</span><span class="w"> </span><span class="n">out</span><span class="p">);</span><span class="w">
-</span><span class="w">        </span><span class="n">count</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">
-</span><span class="w">      </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">        </span><span class="k">break</span><span class="p">;</span><span class="w">
-</span><span class="w">      </span><span class="p">}</span><span class="w">
-</span><span class="w">    </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">set_len</span><span class="p">(</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">count</span><span class="p">);</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="n">elem</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">elem</span><span class="p">);</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>You see that in the fast path (the path where <code>iter.size_hint()</code> tells the truth) we just continuously <code>ptr::write</code>. We branch in the loop, but for most iterators the branch could either easily be removed by the compiler after monomorphisation  - for example, for slices, vectors and wrappers around either of those that preserve <code>size_hint</code>. For those where it isn&rsquo;t, the <code>else</code> branch is taken at most once per run of the loop. This makes it extremely predictable even for CPUs with only basic branch predictors. We then do a &ldquo;real&rdquo; store to the <code>len</code> field only once, and <code>count</code> can easily be put into a register. This optimisation isn&rsquo;t defeated by an iterator that may panic, either. Since we only store to memory after the loop, if it panics during the loop then the calling code will just see the value of <code>self.len</code> from before we entered the loop. We can do this transformation because we know that leaking data when panicking is fine, but LLVM cannot because it would change the meaning of the program<sup id="fnref:3"><a href="#fn:3" class="footnote-ref" role="doc-noteref">3</a></sup>.</p>
-<p>We can see that the difference after this optimisation is large:</p>
-<pre><code> name          smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup 
+</code></pre></div><div class="code-light"><pre><code> name             smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup 
+ macro_from_elem  66                      50                 -16            -24.24%   x 1.32 
+</code></pre></div><p><code>Vec</code> is still faster, but now the difference is only 16ns instead of 130ns. I do wonder if there’s some way to speed up the conversion from <code>Vec</code> to <code>SmallVec</code>, because that’s the only place that the difference could be coming from and it should be essentially instant.</p><p>Now for the fun one. Let’s see <code>SmallVec::extend</code> again:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">impl</span>&lt;A: Array> <span style="color: #bd5eff">Extend</span>&lt;<span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item> <span style="color: #ffbd5e">for</span> SmallVec&lt;A> {
+  <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">extend</span>&lt;I>(<span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> <span style="color: #bd5eff">self</span>, <span style="color: #bd5eff">iterable</span>: I)
+  <span style="color: #ffbd5e">where</span>
+    I: <span style="color: #bd5eff">IntoIterator</span>&lt;Item=<span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item>
+  {
+    <span style="color: #5ef1ff">let</span> iter <span style="color: #bd5eff">=</span> iterable<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into_iter</span>();
+    <span style="color: #5ef1ff">let</span> (lower_size_bound, <span style="color: #bd5eff">_</span>) <span style="color: #bd5eff">=</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">size_hint</span>();
+
+    <span style="color: #5ef1ff">let</span> target_len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">+</span> lower_size_bound;
+
+    <span style="color: #ffbd5e">if</span> target_len <span style="color: #bd5eff">></span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">capacity</span>() {
+       <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">grow</span>(target_len);
+    }
+
+    <span style="color: #ffbd5e">for</span> elem <span style="color: #bd5eff">in</span> iter {
+      <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">push</span>(elem);
+    }
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">impl</span>&lt;A: Array> <span style="color: #a018ff">Extend</span>&lt;<span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item> <span style="color: #d17c00">for</span> SmallVec&lt;A> {
+  <span style="color: #008c99">fn</span> <span style="color: #0057d1">extend</span>&lt;I>(<span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> <span style="color: #a018ff">self</span>, <span style="color: #a018ff">iterable</span>: I)
+  <span style="color: #d17c00">where</span>
+    I: <span style="color: #a018ff">IntoIterator</span>&lt;Item=<span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item>
+  {
+    <span style="color: #008c99">let</span> iter <span style="color: #a018ff">=</span> iterable<span style="color: #f40064">.</span><span style="color: #0057d1">into_iter</span>();
+    <span style="color: #008c99">let</span> (lower_size_bound, <span style="color: #a018ff">_</span>) <span style="color: #a018ff">=</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">size_hint</span>();
+
+    <span style="color: #008c99">let</span> target_len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">+</span> lower_size_bound;
+
+    <span style="color: #d17c00">if</span> target_len <span style="color: #a018ff">></span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">capacity</span>() {
+       <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">grow</span>(target_len);
+    }
+
+    <span style="color: #d17c00">for</span> elem <span style="color: #a018ff">in</span> iter {
+      <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">push</span>(elem);
+    }
+  }
+}
+</code></pre></div><p>So what’s wrong with this? Well, let’s take a look at the source of <code>push</code>:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ff5ea0">pub</span> <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">push</span>(<span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> <span style="color: #bd5eff">self</span>, <span style="color: #bd5eff">value</span>: <span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item) {
+  <span style="color: #5ef1ff">let</span> cap <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">capacity</span>();
+
+  <span style="color: #ffbd5e">if</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">==</span> cap {
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">grow</span>(<span style="color: #5ef1ff">cmp</span><span style="color: #ff5ea0">::</span>max(cap <span style="color: #bd5eff">*</span> 2, 1))
+  }
+
+  <span style="color: #ff5ea0">unsafe</span> {
+    <span style="color: #5ef1ff">let</span> end <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">as_mut_ptr</span>()
+      <span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(<span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>);
+
+    <span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>write(end, value);
+    <span style="color: #5ef1ff">let</span> len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len;
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">set_len</span>(len <span style="color: #bd5eff">+</span> 1)
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #f40064">pub</span> <span style="color: #008c99">fn</span> <span style="color: #0057d1">push</span>(<span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> <span style="color: #a018ff">self</span>, <span style="color: #a018ff">value</span>: <span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item) {
+  <span style="color: #008c99">let</span> cap <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">capacity</span>();
+
+  <span style="color: #d17c00">if</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">==</span> cap {
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">grow</span>(<span style="color: #008c99">cmp</span><span style="color: #f40064">::</span>max(cap <span style="color: #a018ff">*</span> 2, 1))
+  }
+
+  <span style="color: #f40064">unsafe</span> {
+    <span style="color: #008c99">let</span> end <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">as_mut_ptr</span>()
+      <span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(<span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>);
+
+    <span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>write(end, value);
+    <span style="color: #008c99">let</span> len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len;
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">set_len</span>(len <span style="color: #a018ff">+</span> 1)
+  }
+}
+</code></pre></div><p>It’s the same problem again - we know that we don’t need to grow for the first <code>lower_size_bound</code> iterations (because we already preallocated that many elements) but we do anyway. Plus we’re making LLVM’s job hard - it <em>could</em> figure out that because we set <code>self.capacity</code> and then check it against <code>self.len</code> in each iteration of the loop then it can split the loop in two and omit the check for the first <code>self.capacity - self.len</code> iterations, and then from <em>that</em> figure out that the writes can be vectorised, but it’s again relying on a specific set of optimisations in a specific order. Also, we store to <code>self.len</code> every iteration of the loop and although LLVM could load <code>self.len</code> to a register, increment it there, and then store it again, that is not a simple enough optimisation for us to expect it to be reliably performed. Besides, that optimisation cannot be performed for an iterator that may panic, since in that case we need to ensure that <code>self.len</code> is correct after each iteration of the loop. This is because other code could observe it after the panic (even without <code>catch_panic</code>, code in implementations of <code>Drop::drop</code> could observe it). We can do this optimisation ourself and make the code easier to understand by LLVM:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">extend</span>&lt;I>(<span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> <span style="color: #bd5eff">self</span>, <span style="color: #bd5eff">iterable</span>: I)
+<span style="color: #ffbd5e">where</span>
+  I: <span style="color: #bd5eff">IntoIterator</span>&lt;Item=<span style="color: #5ef1ff">A</span><span style="color: #ff5ea0">::</span>Item>
+{
+  <span style="color: #5ef1ff">let</span> <span style="color: #ff5ea0">mut</span> iter <span style="color: #bd5eff">=</span> iterable<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into_iter</span>();
+  <span style="color: #5ef1ff">let</span> (lower_size_bound, <span style="color: #bd5eff">_</span>) <span style="color: #bd5eff">=</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">size_hint</span>();
+
+  <span style="color: #5ef1ff">let</span> target_len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span>len <span style="color: #bd5eff">+</span> lower_size_bound;
+
+  <span style="color: #ffbd5e">if</span> target_len <span style="color: #bd5eff">></span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">capacity</span>() {
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">grow</span>(target_len);
+  }
+
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> This section is new</span>
+  <span style="color: #ff5ea0">unsafe</span> {
+    <span style="color: #5ef1ff">let</span> ptr <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">as_mut_ptr</span>()
+      <span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(<span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">len</span>() <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span>);
+
+    <span style="color: #5ef1ff">let</span> len <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">len</span>();
+    <span style="color: #5ef1ff">let</span> <span style="color: #ff5ea0">mut</span> count <span style="color: #bd5eff">=</span> 0;
+    <span style="color: #ffbd5e">for</span> p <span style="color: #bd5eff">in</span> 0<span style="color: #bd5eff">..</span>lower_size_bound <span style="color: #bd5eff">as</span> <span style="color: #5ef1ff">isize</span> {
+      <span style="color: #ffbd5e">if</span> <span style="color: #5ef1ff">let</span> <span style="color: #bd5eff">Some</span>(out) <span style="color: #bd5eff">=</span> iter<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">next</span>() {
+        <span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">std</span><span style="color: #ff5ea0">::</span><span style="color: #5ef1ff">ptr</span><span style="color: #ff5ea0">::</span>write(ptr<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">offset</span>(p), out);
+        count <span style="color: #bd5eff">+=</span> 1;
+      } <span style="color: #ffbd5e">else</span> {
+        <span style="color: #ffbd5e">break</span>;
+      }
+    }
+
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">set_len</span>(len <span style="color: #bd5eff">+</span> count);
+  }
+
+  <span style="color: #ffbd5e">for</span> elem <span style="color: #bd5eff">in</span> iter {
+    <span style="color: #bd5eff">self</span><span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">push</span>(elem);
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">fn</span> <span style="color: #0057d1">extend</span>&lt;I>(<span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> <span style="color: #a018ff">self</span>, <span style="color: #a018ff">iterable</span>: I)
+<span style="color: #d17c00">where</span>
+  I: <span style="color: #a018ff">IntoIterator</span>&lt;Item=<span style="color: #008c99">A</span><span style="color: #f40064">::</span>Item>
+{
+  <span style="color: #008c99">let</span> <span style="color: #f40064">mut</span> iter <span style="color: #a018ff">=</span> iterable<span style="color: #f40064">.</span><span style="color: #0057d1">into_iter</span>();
+  <span style="color: #008c99">let</span> (lower_size_bound, <span style="color: #a018ff">_</span>) <span style="color: #a018ff">=</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">size_hint</span>();
+
+  <span style="color: #008c99">let</span> target_len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span>len <span style="color: #a018ff">+</span> lower_size_bound;
+
+  <span style="color: #d17c00">if</span> target_len <span style="color: #a018ff">></span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">capacity</span>() {
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">grow</span>(target_len);
+  }
+
+  <span style="color: #7b8496">//</span><span style="color: #7b8496"> This section is new</span>
+  <span style="color: #f40064">unsafe</span> {
+    <span style="color: #008c99">let</span> ptr <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">as_mut_ptr</span>()
+      <span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(<span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">len</span>() <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span>);
+
+    <span style="color: #008c99">let</span> len <span style="color: #a018ff">=</span> <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">len</span>();
+    <span style="color: #008c99">let</span> <span style="color: #f40064">mut</span> count <span style="color: #a018ff">=</span> 0;
+    <span style="color: #d17c00">for</span> p <span style="color: #a018ff">in</span> 0<span style="color: #a018ff">..</span>lower_size_bound <span style="color: #a018ff">as</span> <span style="color: #008c99">isize</span> {
+      <span style="color: #d17c00">if</span> <span style="color: #008c99">let</span> <span style="color: #a018ff">Some</span>(out) <span style="color: #a018ff">=</span> iter<span style="color: #f40064">.</span><span style="color: #0057d1">next</span>() {
+        <span style="color: #f40064">::</span><span style="color: #008c99">std</span><span style="color: #f40064">::</span><span style="color: #008c99">ptr</span><span style="color: #f40064">::</span>write(ptr<span style="color: #f40064">.</span><span style="color: #0057d1">offset</span>(p), out);
+        count <span style="color: #a018ff">+=</span> 1;
+      } <span style="color: #d17c00">else</span> {
+        <span style="color: #d17c00">break</span>;
+      }
+    }
+
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">set_len</span>(len <span style="color: #a018ff">+</span> count);
+  }
+
+  <span style="color: #d17c00">for</span> elem <span style="color: #a018ff">in</span> iter {
+    <span style="color: #a018ff">self</span><span style="color: #f40064">.</span><span style="color: #0057d1">push</span>(elem);
+  }
+}
+</code></pre></div><p>You see that in the fast path (the path where <code>iter.size_hint()</code> tells the truth) we just continuously <code>ptr::write</code>. We branch in the loop, but for most iterators the branch could either easily be removed by the compiler after monomorphisation - for example, for slices, vectors and wrappers around either of those that preserve <code>size_hint</code>. For those where it isn’t, the <code>else</code> branch is taken at most once per run of the loop. This makes it extremely predictable even for CPUs with only basic branch predictors. We then do a “real” store to the <code>len</code> field only once, and <code>count</code> can easily be put into a register. This optimisation isn’t defeated by an iterator that may panic, either. Since we only store to memory after the loop, if it panics during the loop then the calling code will just see the value of <code>self.len</code> from before we entered the loop. We can do this transformation because we know that leaking data when panicking is fine, but LLVM cannot because it would change the meaning of the program <a id="ft-ref-7-3" href="#ft-note-7-3"><sup>3</sup></a> .</p><p>We can see that the difference after this optimisation is large:</p><div class="code-dark"><pre><code> name          smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup 
  extend        102                     70                 -32            -31.37%   x 1.46 
  extend_small  25                      28                   3             12.00%   x 0.89 
 
-</code></pre><p>We&rsquo;re much closer to <code>Vec</code>'s speed than before, and at last <code>SmallVec</code> is faster for the case where it doesn&rsquo;t have to allocate.</p>
-<p>I think that the important takeaways from this are: you don&rsquo;t need to perform every optimisation yourself, but you should make your code as simple and optimisable as possible. It is necessary, however, manually perform any optimisations that changes the meaning of your program. Even if an optimisation seems like it&rsquo;d have a small effect, if you can&rsquo;t expect the compiler to perform it then I think it&rsquo;s worth trying. It&rsquo;s very possible that it can unlock more compiler optimisations. Above all else, though, it&rsquo;s important to actually benchmark your optimisations. You wouldn&rsquo;t expect your code to be correct without testing it (even if that testing is by running the program and clicking around) so why would you expect your code to be fast if you don&rsquo;t benchmark it. <code>SmallVec</code> actually had no comparisons to <code>Vec</code> in its test suite until I wrote some for the purposes of this article. There are a <em>lot</em> of crates out there that currently use <code>smallvec</code> - <a href="https://crates.io/crates/smallvec/reverse_dependencies">crates.io lists 9 pages of crates using it at time of writing</a>. If you&rsquo;re using <code>smallvec</code> for its performance benefits, it&rsquo;s worth benchmarking your program using <code>Vec</code> with <code>Vec::with_capacity</code> instead. Usually the simpler implementation is the faster one.</p>
-<section class="footnotes" role="doc-endnotes">
-<hr>
-<ol>
-<li id="fn:1" role="doc-endnote">
-<p>To make the benchmarks fair I preallocated the vector with the same number of elements that the <code>SmallVec</code> preallocated on the stack (16). I believe this is fair because in a real program you can always easily replace calls to <code>Vec::new</code> with <code>Vec::with_capacity(N)</code> where <code>N</code> was the number that you would have put into <code>SmallVec::&lt;[T; N]&gt;::new</code>. To see the exact methodology you can see <a href="https://github.com/servo/rust-smallvec/commit/291eb90ed1eaabf0e02987de9c3c76d1b85b6a53">this commit</a>. <a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:2" role="doc-endnote">
-<p>During the writing of this article I realised that this function is actually unsound. One interesting thing about writing unsafe Rust is that safe code is never to be trusted. You can use values from safe code as hints but it should be impossible to cause unsoundness by returning incorrect values from safe code. This means, for example, that <code>Iterator::size_hint</code> can return essentially whatever it wants. Also, it should be possible for safe code to panic at any point without causing unsoundness (although it&rsquo;s allowed to cause arbitrarily bad behaviour otherwise, like infinite loops or leaking data). You can see a visual explanation of this bug in <a href="https://gist.github.com/Vurich/ffa55d8e69377a64c9708e07c2db2a1b">this gist</a>. At the time of writing it&rsquo;s still unfixed but <a href="https://github.com/servo/rust-smallvec/issues/96">I opened an issue</a> where you can track its progress. <a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:3" role="doc-endnote">
-<p>It&rsquo;s actually possible for LLVM to do the increment in a register and just add the code to actually store the length into the panic cleanup code. <code>Vec</code> actually does this explicitly with a <code>SetLenOnDrop</code> struct. Again though, it&rsquo;s a complex optimisation and you can&rsquo;t rely on LLVM applying it. <a href="#fnref:3" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-</ol>
-</section>
+</code></pre></div><div class="code-light"><pre><code> name          smallvec.bench ns/iter  vec.bench ns/iter  diff ns/iter   diff %  speedup 
+ extend        102                     70                 -32            -31.37%   x 1.46 
+ extend_small  25                      28                   3             12.00%   x 0.89 
 
-</div>
-
-<footer>
-	<p>© 2017-2018, all rights reserved.</a>
-</footer>
-</body>
-</html>
+</code></pre></div><p>We’re much closer to <code>Vec</code>’s speed than before, and at last <code>SmallVec</code> is faster for the case where it doesn’t have to allocate.</p><p>I think that the important takeaways from this are: you don’t need to perform every optimisation yourself, but you should make your code as simple and optimisable as possible. It is necessary, however, manually perform any optimisations that changes the meaning of your program. Even if an optimisation seems like it’d have a small effect, if you can’t expect the compiler to perform it then I think it’s worth trying. It’s very possible that it can unlock more compiler optimisations. Above all else, though, it’s important to actually benchmark your optimisations. You wouldn’t expect your code to be correct without testing it (even if that testing is by running the program and clicking around) so why would you expect your code to be fast if you don’t benchmark it. <code>SmallVec</code> actually had no comparisons to <code>Vec</code> in its test suite until I wrote some for the purposes of this article. There are a <em>lot</em> of crates out there that currently use <code>smallvec</code> - <a href="https://crates.io/crates/smallvec/reverse_dependencies">crates.io lists 9 pages of crates using it at time of writing</a>. If you’re using <code>smallvec</code> for its performance benefits, it’s worth benchmarking your program using <code>Vec</code> with <code>Vec::with_capacity</code> instead. Usually the simpler implementation is the faster one.</p><section class="footnotes" role="doc-endnotes"><hr><ol><li id="ft-note-7-1"><p>To make the benchmarks fair I preallocated the vector with the same number of elements that the <code>SmallVec</code> preallocated on the stack (16). I believe this is fair because in a real program you can always easily replace calls to <code>Vec::new</code> with <code>Vec::with_capacity(N)</code> where <code>N</code> was the number that you would have put into <code>SmallVec::&lt;[T; N]>::new</code>. To see the exact methodology you can see <a href="https://github.com/servo/rust-smallvec/commit/291eb90ed1eaabf0e02987de9c3c76d1b85b6a53">this commit</a>.</p><div class="ft-return-link"><a href="#ft-ref-7-1">↩︎</a></div></li><li id="ft-note-7-2"><p>During the writing of this article I realised that this function is actually unsound. One interesting thing about writing unsafe Rust is that safe code is never to be trusted. You can use values from safe code as hints but it should be impossible to cause unsoundness by returning incorrect values from safe code. This means, for example, that <code>Iterator::size_hint</code> can return essentially whatever it wants. Also, it should be possible for safe code to panic at any point without causing unsoundness (although it’s allowed to cause arbitrarily bad behaviour otherwise, like infinite loops or leaking data). You can see a visual explanation of this bug in <a href="https://gist.github.com/Vurich/ffa55d8e69377a64c9708e07c2db2a1b">this gist</a>. At the time of writing it’s still unfixed but <a href="https://github.com/servo/rust-smallvec/issues/96">I opened an issue</a> where you can track its progress.</p><div class="ft-return-link"><a href="#ft-ref-7-2">↩︎</a></div></li><li id="ft-note-7-3"><p>It’s actually possible for LLVM to do the increment in a register and just add the code to actually store the length into the panic cleanup code. <code>Vec</code> actually does this explicitly with a <code>SetLenOnDrop</code> struct. Again though, it’s a complex optimisation and you can’t rely on LLVM applying it.</p><div class="ft-return-link"><a href="#ft-ref-7-3">↩︎</a></div></li></ol></section></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>

@@ -1,225 +1,881 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>In which the CPU changes my data under my nose</title>
-    
-    <meta name="description" content="">
-    
-    <meta itemprop="name" content="In which the CPU changes my data under my nose">
-    
-    
-    <meta name="og:title" content="In which the CPU changes my data under my nose">
-    
-        <meta name="image" content="http://troubles.md/floppies.png">
-        <meta name="og:image" content="http://troubles.md/floppies.png">
-       <meta name="og:url" content="http://troubles.md/i-triple-equals/">
-    <meta name="og:site_name" content="In which the CPU changes my data under my nose">
-    <meta name="og:type" content="article">
-    
-    <meta name="article:tag" content="">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/style.css">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/syntax.css">
-    <script async>
-        window.onload = function() {
-            var possibilities = [
-                 "A high-level view of low-level code",  "Writing words and reading DWORDS", 
-            ];
+<!DOCTYPE html><html><head><meta name="og:type" content="article"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="og:title" content="In which the CPU changes my data under my nose"><meta itemprop="name" content="In which the CPU changes my data under my nose"><meta name="image" content="floppies.png"><meta name="og:image" content="floppies.png"><title>In which the CPU changes my data under my nose - troubles.md</title><style rel="stylesheet" type="text/css">@import url("https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square");
 
-            document.getElementById('subtitle').innerHTML = possibilities[Math.floor(possibilities.length * Math.random())];
-        };
-    </script>
-</head>
+/* Light theme by default */
+:root {
+    --main-header-font: "Bevan", monospace;
+    --secondary-header-font: "Sanchez", monospace;
+    --body-font: "Lato", sans-serif;
+    --code-font: "Cascadia Mono", monospace;
+    --default-inset: 11pt;
+    --expanded-inset: 20pt;
+    --title-inset: 28pt;
+    --background-color: #fff;
+    --header-font-color: #777;
+    --font-color: #000;
+    --pre-font-color: #333;
+    --date-color: #667;
+    --code-background-color: #f7f7f7;
+    --accent-color: #0594cb;
+}
 
-<body>
+@counter-style custom {
+    system: cyclic;
+    symbols: "┃";
+    suffix: " ";
+}
 
-<header>
-    
-    <span>
-        <a href="http://troubles.md/" class="title"><strong>troubles.md</strong></a>
-        <span class="dash"> - </span><p id="subtitle" class="subtitle">A high-level view of low-level code</p>
-        
-        
-    </span>
-    
-    <a class="rss" href="http://troubles.md/index.xml">
-        <strong>
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="feather feather-rss"
-            >
-                <path d="M4 11a9 9 0 0 1 9 9">
-                </path>
-                <path d="M4 4a16 16 0 0 1 16 16">
-                </path>
-                <circle cx="5" cy="19" r="1">
-                </circle>
-            </svg>
-        </strong>
-    </a>
-</header>
+.code-dark {
+    display: none;
+}
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #252525;
+        --header-font-color: #aaa;
+        --font-color: #eee;
+        --pre-font-color: #bababa;
+        --date-color: #999;
+        --code-background-color: #333;
+    }
 
-<div class="content">
-  <h1>In which the CPU changes my data under my nose <aside></aside></h1>
-  <p>IEEE 754 has been the source of jokes and confusion for a while because of its <a href="https://0.30000000000000004.com/">imprecise representation of decimal numbers</a>, but the truth is that it&rsquo;s an easily-implementable, efficient representation of floating-point numbers and a lot of applications that don&rsquo;t need high precision couldn&rsquo;t easily do without it. It&rsquo;s not without its peculiarities though. Or rather, pecularity, singular. Specifically, the existence of NaN. NaN is a weird beast, taking up <a href="https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Exponent_encoding">16777208</a> possible values that could have otherwise been used for real data (although some sneaky people get away with using them <a href="https://softwareengineering.stackexchange.com/questions/185406/what-is-the-purpose-of-nan-boxing">for special values</a>) and <a href="https://doc.rust-lang.org/std/cmp/trait.PartialOrd.html">forcing Rust to split its comparison traits into &ldquo;partial&rdquo; and &ldquo;total&rdquo; variants</a>. A lot of developer time and effort has been spent working out precisely how to handle NaN, and this is the story of my recent personal contribution to that time and effort.</p>
-<p>This particular story about NaN starts with a strange bug in <a href="https://github.com/paritytech/wasmi"><code>wasmi</code></a>, our experimental WebAssembly interpreter for blockchains here at <a href="https://github.com/paritytech/">Parity</a>. The tests were failing when compiled for 32-bit, but not for 64-bit. After rewriting our WebAssembly test harness to correctly report failures, I narrowed it down to a few test cases that looked something like the following:</p>
-<div class="highlight"><pre class="chroma"><code class="language-lisp" data-lang="lisp"><span class="p">(</span><span class="nv">module</span>
-  <span class="c1">;; ...</span>
-  <span class="p">(</span><span class="nv">func</span> <span class="p">(</span><span class="nf">export</span> <span class="s">&#34;f32.reinterpret_i32&#34;</span><span class="p">)</span> <span class="p">(</span><span class="nv">param</span> <span class="nv">$x</span> <span class="nv">i32</span><span class="p">)</span>
-                                       <span class="p">(</span><span class="nv">result</span> <span class="nv">f32</span><span class="p">)</span>
-        <span class="p">(</span><span class="nv">f32.reinterpret/i32</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$x</span><span class="p">)))</span>
-  <span class="p">(</span><span class="nv">func</span> <span class="p">(</span><span class="nf">export</span> <span class="s">&#34;i32.reinterpret_f32&#34;</span><span class="p">)</span> <span class="p">(</span><span class="nv">param</span> <span class="nv">$x</span> <span class="nv">f32</span><span class="p">)</span>
-                                       <span class="p">(</span><span class="nv">result</span> <span class="nv">i32</span><span class="p">)</span>
-        <span class="p">(</span><span class="nv">i32.reinterpret/f32</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$x</span><span class="p">)))</span>
-  <span class="c1">;; ...</span>
-<span class="p">)</span>
+    footer img {
+        filter: invert();
+    }
 
-<span class="c1">;; ...</span>
+    .code-dark {
+        display: block;
+    }
 
-<span class="p">(</span><span class="nv">assert_return</span> <span class="p">(</span><span class="nv">invoke</span> <span class="s">&#34;f32.reinterpret_i32&#34;</span>
-                       <span class="p">(</span><span class="nv">i32.const</span> <span class="nv">0x7fa00000</span><span class="p">))</span>
-               <span class="p">(</span><span class="nv">f32.const</span> <span class="nv">nan:0x200000</span><span class="p">))</span> 
-<span class="p">(</span><span class="nv">assert_return</span> <span class="p">(</span><span class="nv">invoke</span> <span class="s">&#34;f32.reinterpret_i32&#34;</span>
-                       <span class="p">(</span><span class="nv">i32.const</span> <span class="nv">0xffa00000</span><span class="p">))</span>
-               <span class="p">(</span><span class="nv">f32.const</span> <span class="nv">-nan:0x200000</span><span class="p">))</span>
-<span class="p">(</span><span class="nv">assert_return</span> <span class="p">(</span><span class="nv">invoke</span> <span class="s">&#34;i32.reinterpret_f32&#34;</span>
-                       <span class="p">(</span><span class="nv">f32.const</span> <span class="nv">nan:0x200000</span><span class="p">))</span>
-               <span class="p">(</span><span class="nv">i32.const</span> <span class="nv">0x7fa00000</span><span class="p">))</span> 
-<span class="p">(</span><span class="nv">assert_return</span> <span class="p">(</span><span class="nv">invoke</span> <span class="s">&#34;i32.reinterpret_f32&#34;</span>
-                       <span class="p">(</span><span class="nv">f32.const</span> <span class="nv">-nan:0x200000</span><span class="p">))</span>
-               <span class="p">(</span><span class="nv">i32.const</span> <span class="nv">0xffa00000</span><span class="p">))</span>
-</code></pre></div><p>All other tests were succeeding, but doing a bitwise cast from integer to float and vice-versa was failing. Furthermore, these tests all succeeded on x86_64 (i.e. when compiled for 64-bit), they only failed on x86 (i.e. when compiled for 32-bit). Lastly, the difference between the expected value and the received value was only one bit. Instead of returning a float with the bit pattern <code>0x7fa00000</code> it would return <code>0x7fe00000</code> instead. If you&rsquo;ve worked with NaNs before, you might have noticed something:</p>
-<pre><code>Expected: 0b11111111010000000000000000000000000
+    .code-light {
+        display: none;
+    }
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--font-color);
+}
+
+body,
+li p {
+    font-family: var(--body-font), sans-serif;
+    letter-spacing: 0.15pt;
+    word-spacing: 0.08pt;
+    line-height: 1.8;
+}
+
+h2,
+h3 {
+    --line-width: 9pt;
+    --inset: var(--title-inset);
+
+    display: flex;
+    flex-direction: row;
+    background-color: var(--code-background-color);
+    border-left: var(--line-width) solid var(--accent-color);
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+    padding-left: calc(var(--inset) - var(--line-width));
+    padding-right: 0.6rem;
+    padding-bottom: 0.2rem;
+    margin-top: 2.1rem;
+    margin-bottom: 0.4rem;
+}
+
+h2 span,
+h3 span {
+    display: none;
+}
+
+h2 .section-title,
+h3 .section-title {
+    display: inline-block;
+}
+
+.section-link-postfix {
+    display: flex;
+
+    flex-direction: column;
+    justify-content: space-around;
+
+    font-family: var(--body-font);
+    font-size: 90%;
+    padding-left: 12pt;
+    margin-left: auto;
+}
+
+.section-link-postfix a {
+    opacity: 0.7;
+    color: var(--header-font-color);
+}
+
+h2 a span,
+h3 a span {
+    font-size: 18px;
+    color: var(--code-background-color);
+}
+
+h2 a span {
+    padding-top: 0.5rem;
+}
+
+h3 a span {
+    padding-top: 0.1rem;
+}
+
+h2 .section-link a:hover,
+h3 .section-link a:hover {
+    background-color: var(--accent-color);
+}
+
+h2 .section-link a:hover span,
+h3 .section-link a:hover span {
+    display: block;
+}
+
+a .section-link {
+    font-size: calc(100% * var(--font-perc));
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--secondary-header-font), serif;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+}
+
+a code {
+    color: var(--accent-color);
+}
+
+h1 {
+    font-family: var(--main-header-font), serif;
+    font-weight: normal;
+    letter-spacing: 1pt;
+    display: block;
+    font-size: 250%;
+    line-height: 1.2;
+    padding-top: 0.02em;
+    margin-top: 1em;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+h2 {
+    font-size: 170%;
+}
+
+h3 {
+    font-size: 120%;
+}
+
+.post-link {
+    margin-bottom: 1em;
+}
+
+.post-link a {
+    font-family: var(--secondary-header-font);
+    color: var(--font-color);
+}
+
+header .blog-name a {
+    font-family: "Nova Square";
+    font-size: 130%;
+    letter-spacing: 3pt;
+    color: var(--font-color);
+    border-right: 3px solid var(--accent-color);
+}
+
+@keyframes blink-cursor {
+    50% {
+        border-right: unset;
+    }
+}
+
+header .blog-name a:hover {
+    animation: blink-cursor 1s linear infinite;
+}
+
+header,
+header a {
+    color: var(--header-font-color);
+    text-decoration: none;
+}
+
+/* reset */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    height: 100%;
+}
+
+li:target {
+    background-color: var(--code-background-color);
+}
+
+body {
+    padding: 0rem 0em 0rem 0em;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "kern=1";
+    -moz-font-feature-settings: "kern" 1;
+    -webkit-font-feature-settings: "kern" 1;
+    -o-font-feature-settings: "kern" 1;
+    -ms-font-feature-settings: "kern" 1;
+    font-feature-settings: "kern" 1;
+
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "liga=1";
+    -moz-font-feature-settings: "liga" 1;
+    -webkit-font-feature-settings: "liga" 1;
+    -o-font-feature-settings: "liga" 1;
+    -ms-font-feature-settings: "liga" 1;
+    font-feature-settings: "liga" 1;
+}
+
+.spon {
+    width: 100%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 14px;
+    background-color: rgb(243, 243, 165);
+    border-left: 3px solid var(--font-color);
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    padding-left: 12px;
+    padding-top: 5px;
+}
+
+.attribution {
+    display: block;
+    font-size: 18px;
+    font-family: "Montserrat", sans-serif;
+    width: 100%;
+    line-height: 1.8;
+    margin-top: 5px;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+header {
+    --inset: var(--title-inset);
+
+    font-family: "Cascadia Mono";
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.2;
+    justify-content: space-between;
+    /*background-color: var(--code-background-color);*/
+    display: flex;
+    letter-spacing: 0.7pt;
+    align-items: center;
+    padding: 0.5rem var(--inset);
+    border-bottom: 0.1em solid var(--header-font-color);
+    margin-bottom: 1.5rem;
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+}
+
+header a:hover {
+    color: var(--header-font-color);
+}
+
+.blog-name {
+    font-weight: 900;
+    justify-self: start;
+}
+
+.tagline {
+    justify-self: end;
+    font-weight: 100;
+}
+
+.blog-name,
+.tagline {
+    margin-bottom: 0px;
+    text-decoration: none;
+}
+
+footer {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 180px;
+}
+
+footer img {
+    width: 30px;
+    height: 30px;
+}
+
+.footnotes li p {
+    display: inline;
+}
+
+.ft-return-link {
+    display: inline;
+    margin-left: 0.5em;
+}
+
+.title {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.title aside {
+    width: 100%;
+    text-align: right;
+}
+
+.post-link:first-of-type {
+    margin-top: 1rem;
+}
+
+.post-link {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.post-link aside {
+    min-width: 152px;
+}
+
+.post-link a {
+    padding-left: var(--default-inset);
+    margin-left: calc(-1 * var(--default-inset));
+    line-height: 1.6;
+    padding-right: 1.5rem;
+    flex-grow: 1;
+}
+
+aside {
+    font-family: "Lato", sans-serif;
+    font-size: 0.84rem;
+    align-self: center;
+    line-height: 1.4;
+    color: var(--date-color);
+    text-align: right;
+    margin-right: 1em;
+    text-wrap-mode: nowrap;
+}
+
+aside em {
+    font-size: 0.7rem;
+}
+
+p {
+    margin-bottom: 1em;
+}
+
+ul {
+    list-style: custom;
+}
+
+ul li::marker {
+    color: var(--accent-color);
+}
+
+ol li::marker {
+    color: var(--header-font-color);
+}
+
+li li::marker {
+    color: var(--date-color);
+}
+
+ul {
+    margin-bottom: 1em;
+}
+
+ul ul,
+ol ol {
+    margin-bottom: 0;
+    padding-left: 1em;
+}
+
+li p {
+    margin-bottom: 0;
+}
+
+li {
+    padding-left: 0.3em;
+    margin-left: 1em;
+    margin-bottom: 0.5em;
+}
+
+table {
+    margin-bottom: 1.5em;
+    border-collapse: collapse;
+    width: 95%;
+}
+
+table tr + tr {
+    border-top: 1px solid #ccc;
+}
+table td + td {
+    border-left: 1px solid #ccc;
+}
+
+table td {
+    padding: 0.4em;
+    text-align: center;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+table th {
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 95%;
+    padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+    line-height: 1.05;
+}
+
+img {
+    width: 100%;
+}
+
+a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+div.nav a:active div {
+    background: #cacaca;
+}
+
+a:active {
+    color: var(--header-font-color);
+}
+
+a:hover {
+    background: var(--code-background-color);
+}
+
+.post-link a:hover {
+    color: var(--date-color);
+}
+
+pre {
+    margin-left: var(--expanded-inset);
+    margin-right: var(--expanded-inset);
+    padding-left: 1.4em;
+    padding-top: 1em;
+    padding-bottom: 1em;
+    margin-bottom: 1em;
+    background-color: var(--code-background-color);
+    overflow: auto;
+    line-height: 1.5;
+    letter-spacing: -0.2pt;
+    border-left: 3.5px solid #bbb;
+    font-size: 85%;
+}
+
+code {
+    font-family: var(--code-font), monospace;
+    color: var(--pre-font-color);
+    display: inline-block;
+    max-width: 100%;
+    font-variant-ligatures: none;
+    text-rendering: auto;
+    -moz-font-feature-settings: "liga=0";
+    -moz-font-feature-settings: "liga" 0;
+    -webkit-font-feature-settings: "liga" 0;
+    -o-font-feature-settings: "liga" 0;
+    -ms-font-feature-settings: "liga" 0;
+    font-feature-settings: "liga" 0;
+}
+
+h1 > code,
+h2 > code,
+h3 > code,
+h4 > code,
+p > code {
+    display: inline-block;
+    text-transform: none;
+    padding-left: 0.1em;
+    padding-right: 0.1em;
+    font-size: 103%;
+    color: var(--pre-font-color);
+}
+
+figcaption {
+    font-weight: 400;
+    font-style: italic;
+    font-size: 0.7em/1.52;
+    line-height: 1.3;
+    color: #666665;
+    outline: 0;
+    z-index: 300;
+    text-align: center;
+}
+
+blockquote {
+    border-left: 3.5px solid var(--accent-color);
+    margin: 10px var(--expanded-inset);
+    padding: var(--default-inset) 20px;
+}
+
+blockquote p {
+    display: inline;
+}
+
+.content {
+    margin-bottom: 30px;
+}
+
+@media all {
+    html {
+        font-size: 18px;
+    }
+    .main {
+        margin-left: 7.5rem;
+        margin-right: 7.5rem;
+    }
+}
+@media all and (max-width: 1200px) {
+    pre {
+        margin-left: var(--default-inset);
+        margin-right: var(--default-inset);
+    }
+
+    blockquote {
+        margin: 0.7em var(--default-inset);
+    }
+}
+@media all and (max-width: 840px) {
+    h2,
+    h3 {
+        padding-left: var(--default-inset);
+        padding-right: var(--default-inset);
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    .post-link {
+        flex-direction: column-reverse;
+        justify-content: unset;
+    }
+
+    .post-link aside {
+        align-self: start;
+        text-align: left;
+    }
+
+    .title h1 {
+        text-align: center;
+    }
+
+    .main {
+        margin-left: 4rem;
+        margin-right: 4rem;
+    }
+}
+@media all and (max-width: 760px) {
+    .title h1 {
+        font-size: 24pt;
+    }
+
+    .main {
+        margin-left: 2.5rem;
+        margin-right: 2.5rem;
+    }
+}
+@media all and (max-width: 580px) {
+    .title h1 {
+        font-size: 20pt;
+    }
+
+    .tagline {
+        display: block;
+        font-size: 12px;
+    }
+
+    h2,
+    h3 {
+        --line-width: 4pt;
+        --inset: var(--default-inset);
+
+        margin-top: 0.4em;
+        padding-left: calc(var(--inset) - var(--line-width));
+    }
+
+    h2 .section-link,
+    h3 .section-link {
+        display: none;
+    }
+
+    h2 {
+        padding-top: 2pt;
+        font-size: 20pt;
+        padding-bottom: 2pt;
+    }
+
+    h3 {
+        font-size: 17pt;
+    }
+
+    aside.date-short {
+        display: none;
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    body,
+    li p {
+        line-height: 1.5;
+    }
+
+    header .separator {
+        visibility: collapse;
+    }
+
+    .main {
+        margin: 0 var(--default-inset);
+    }
+}
+</style></head><body><div class="main"><header><span class="blog-name"><a href="../index.html">troubles.md</a></span> <span class="tagline">Writing words and reading dwords</span></header><span></span><div class="content"><div class="title"><h1>In which the CPU changes my data under my nose</h1><aside>15 May, 2018</aside></div><div class="post"><p>IEEE 754 has been the source of jokes and confusion for a while because of its <a href="https://0.30000000000000004.com/">imprecise representation of decimal numbers</a>, but the truth is that it’s an easily-implementable, efficient representation of floating-point numbers and a lot of applications that don’t need high precision couldn’t easily do without it. It’s not without its peculiarities though. Or rather, pecularity, singular. Specifically, the existence of NaN. NaN is a weird beast, taking up <a href="https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Exponent_encoding">16777208</a> possible values that could have otherwise been used for real data (although some sneaky people get away with using them <a href="https://softwareengineering.stackexchange.com/questions/185406/what-is-the-purpose-of-nan-boxing">for special values</a>) and <a href="https://doc.rust-lang.org/std/cmp/trait.PartialOrd.html">forcing Rust to split its comparison traits into “partial” and “total” variants</a>. A lot of developer time and effort has been spent working out precisely how to handle NaN, and this is the story of my recent personal contribution to that time and effort.</p><p>This particular story about NaN starts with a strange bug in <a href="https://github.com/paritytech/wasmi"><code>wasmi</code></a>, our experimental WebAssembly interpreter for blockchains here at <a href="https://github.com/paritytech/">Parity</a>. The tests were failing when compiled for 32-bit, but not for 64-bit. After rewriting our WebAssembly test harness to correctly report failures, I narrowed it down to a few test cases that looked something like the following:</p><div class="code-dark"><pre><code data-lang="lisp">(<span style="color: #5ea1ff">module</span>
+  <span style="color: #7b8496">;;</span><span style="color: #7b8496"> ...</span>
+  (<span style="color: #5ea1ff">func</span> (<span style="color: #5ea1ff">export</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">f32.reinterpret_i32</span><span style="color: #5eff6c">"</span>) (<span style="color: #5ea1ff">param</span> $x i32)
+                                       (<span style="color: #5ea1ff">result</span> f32)
+        (<span style="color: #5ea1ff">f32.reinterpret/i32</span> (<span style="color: #5ea1ff">get_local</span> $x)))
+  (<span style="color: #5ea1ff">func</span> (<span style="color: #5ea1ff">export</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">i32.reinterpret_f32</span><span style="color: #5eff6c">"</span>) (<span style="color: #5ea1ff">param</span> $x f32)
+                                       (<span style="color: #5ea1ff">result</span> i32)
+        (<span style="color: #5ea1ff">i32.reinterpret/f32</span> (<span style="color: #5ea1ff">get_local</span> $x)))
+  <span style="color: #7b8496">;;</span><span style="color: #7b8496"> ...</span>
+)
+
+<span style="color: #7b8496">;;</span><span style="color: #7b8496"> ...</span>
+
+(<span style="color: #5ea1ff">assert_return</span> (<span style="color: #5ea1ff">invoke</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">f32.reinterpret_i32</span><span style="color: #5eff6c">"</span>
+                       (<span style="color: #5ea1ff">i32.const</span> 0x7fa00000))
+               (<span style="color: #5ea1ff">f32.const</span> nan<span style="color: #ff5ea0">:</span>0x200000)) 
+(<span style="color: #5ea1ff">assert_return</span> (<span style="color: #5ea1ff">invoke</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">f32.reinterpret_i32</span><span style="color: #5eff6c">"</span>
+                       (<span style="color: #5ea1ff">i32.const</span> 0xffa00000))
+               (<span style="color: #5ea1ff">f32.const</span> -nan<span style="color: #ff5ea0">:</span>0x200000))
+(<span style="color: #5ea1ff">assert_return</span> (<span style="color: #5ea1ff">invoke</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">i32.reinterpret_f32</span><span style="color: #5eff6c">"</span>
+                       (<span style="color: #5ea1ff">f32.const</span> nan<span style="color: #ff5ea0">:</span>0x200000))
+               (<span style="color: #5ea1ff">i32.const</span> 0x7fa00000)) 
+(<span style="color: #5ea1ff">assert_return</span> (<span style="color: #5ea1ff">invoke</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">i32.reinterpret_f32</span><span style="color: #5eff6c">"</span>
+                       (<span style="color: #5ea1ff">f32.const</span> -nan<span style="color: #ff5ea0">:</span>0x200000))
+               (<span style="color: #5ea1ff">i32.const</span> 0xffa00000))
+</code></pre></div><div class="code-light"><pre><code data-lang="lisp">(<span style="color: #0057d1">module</span>
+  <span style="color: #7b8496">;;</span><span style="color: #7b8496"> ...</span>
+  (<span style="color: #0057d1">func</span> (<span style="color: #0057d1">export</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">f32.reinterpret_i32</span><span style="color: #008b0c">"</span>) (<span style="color: #0057d1">param</span> $x i32)
+                                       (<span style="color: #0057d1">result</span> f32)
+        (<span style="color: #0057d1">f32.reinterpret/i32</span> (<span style="color: #0057d1">get_local</span> $x)))
+  (<span style="color: #0057d1">func</span> (<span style="color: #0057d1">export</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">i32.reinterpret_f32</span><span style="color: #008b0c">"</span>) (<span style="color: #0057d1">param</span> $x f32)
+                                       (<span style="color: #0057d1">result</span> i32)
+        (<span style="color: #0057d1">i32.reinterpret/f32</span> (<span style="color: #0057d1">get_local</span> $x)))
+  <span style="color: #7b8496">;;</span><span style="color: #7b8496"> ...</span>
+)
+
+<span style="color: #7b8496">;;</span><span style="color: #7b8496"> ...</span>
+
+(<span style="color: #0057d1">assert_return</span> (<span style="color: #0057d1">invoke</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">f32.reinterpret_i32</span><span style="color: #008b0c">"</span>
+                       (<span style="color: #0057d1">i32.const</span> 0x7fa00000))
+               (<span style="color: #0057d1">f32.const</span> nan<span style="color: #f40064">:</span>0x200000)) 
+(<span style="color: #0057d1">assert_return</span> (<span style="color: #0057d1">invoke</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">f32.reinterpret_i32</span><span style="color: #008b0c">"</span>
+                       (<span style="color: #0057d1">i32.const</span> 0xffa00000))
+               (<span style="color: #0057d1">f32.const</span> -nan<span style="color: #f40064">:</span>0x200000))
+(<span style="color: #0057d1">assert_return</span> (<span style="color: #0057d1">invoke</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">i32.reinterpret_f32</span><span style="color: #008b0c">"</span>
+                       (<span style="color: #0057d1">f32.const</span> nan<span style="color: #f40064">:</span>0x200000))
+               (<span style="color: #0057d1">i32.const</span> 0x7fa00000)) 
+(<span style="color: #0057d1">assert_return</span> (<span style="color: #0057d1">invoke</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">i32.reinterpret_f32</span><span style="color: #008b0c">"</span>
+                       (<span style="color: #0057d1">f32.const</span> -nan<span style="color: #f40064">:</span>0x200000))
+               (<span style="color: #0057d1">i32.const</span> 0xffa00000))
+</code></pre></div><p>All other tests were succeeding, but doing a bitwise cast from integer to float and vice-versa was failing. Furthermore, these tests all succeeded on x86_64 (i.e. when compiled for 64-bit), they only failed on x86 (i.e. when compiled for 32-bit). Lastly, the difference between the expected value and the received value was only one bit. Instead of returning a float with the bit pattern <code>0x7fa00000</code> it would return <code>0x7fe00000</code> instead. If you’ve worked with NaNs before, you might have noticed something:</p><div class="code-dark"><pre><code>Expected: 0b11111111010000000000000000000000000
 Got:      0b11111111110000000000000000000000000
                     ^ This bit is different
-</code></pre><p>That&rsquo;s right, it&rsquo;s the <a href="https://en.wikipedia.org/wiki/NaN#Signaling_NaN">quiet bit</a>! For those unaware, the quiet bit determines whether or not the number should raise an exception when you attempt to use it. This is because the <a href="https://en.wikipedia.org/wiki/IEEE_754">IEEE 754 standard</a> was written at a time when it wasn&rsquo;t necessarily expected that a programming language would include exceptions. The standard includes provisions to allow hardware-level exceptions when, for example, dividing zero by zero. The idea is that when the hardware tries to execute an invalid floating point operation it is allowed to generate a &ldquo;signalling NaN&rdquo;, or sNaN. This is what we see above - the quiet bit is set to 0, meaning that the NaN is signalling<sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>. When you try to use this value (for example, by multiplying it with another number) the hardware is allowed to generate an exception and then return a &ldquo;quiet NaN&rdquo;, or qNaN, which has the quiet bit set to 1. I say &ldquo;allowed to&rdquo; rather than &ldquo;does&rdquo; or &ldquo;should&rdquo; because IEEE 754 leaves this unspecified, and in fact as far as I can tell x86 and ARM never generate sNaNs, the only way to create them is to reinterpret an integer with the signalling bit set. Originally, I thought the source of the problem was obvious: <a href="https://github.com/rust-lang/rust/pull/39271">Rust was quieting NaN when casting an int to a float</a>. I remember seeing <a href="https://github.com/tomaka">tomaka</a>&lsquo;s<sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup> talk at RustFest 2017 on binding C libraries where he mentioned that Rust guarantees that all NaNs are quiet and that you have to explicitly handle that when using floats returned from C (where sNaNs are allowed). So I checked the source of <code>f32::from_bits</code> and&hellip; <a href="https://github.com/rust-lang/rust/blob/8010604b2d888ac839147fe27de76cdcc713aa1b/src/libcore/num/f32.rs#L270-L275">nope</a>. It just does a normal reintepret. Turns out tomaka&rsquo;s advice was out of date, and Rust <a href="https://github.com/rust-lang/rust/pull/46012/commits/439576fd7bedf741db5fb6a21c902e858d51f2a0">now allows sNaNs</a></p>
-<p>So the hunt was on - where are we operating on this float value? Looking at the code it looked like we just take the number directly from the WebAssembly bytecode and interpret it as a float, no operations required. The bytecode must be correct - after all, the same code compiled for 64-bit worked correctly, and they both read the same bytecode. Since reading the code wasn&rsquo;t helping me at all, I opened up the LLDB debugger<sup id="fnref:3"><a href="#fn:3" class="footnote-ref" role="doc-noteref">3</a></sup> and attached it to the test binary that is output by <code>cargo test --no-run</code>. Stepping through functions and checking their return value, I eventually found the culprit:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">fn</span> <span class="nf">run_reinterpret</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="n">U</span><span class="o">&gt;</span><span class="p">(</span><span class="w">
-</span><span class="w">  </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w">
-</span><span class="w">  </span><span class="n">context</span>: <span class="kp">&amp;</span><span class="nc">mut</span><span class="w"> </span><span class="n">FunctionContext</span><span class="w">
-</span><span class="w"></span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nb">Result</span><span class="o">&lt;</span><span class="n">InstructionOutcome</span><span class="p">,</span><span class="w"> </span><span class="n">TrapKind</span><span class="o">&gt;</span><span class="w">
-</span><span class="w"></span><span class="k">where</span><span class="w">
-</span><span class="w">  </span><span class="n">RuntimeValue</span>: <span class="nb">From</span><span class="o">&lt;</span><span class="n">U</span><span class="o">&gt;</span><span class="p">,</span><span class="w">
-</span><span class="w">  </span><span class="n">T</span>: <span class="nc">FromRuntimeValue</span><span class="p">,</span><span class="w">
-</span><span class="w">  </span><span class="n">T</span>: <span class="nc">TransmuteInto</span><span class="o">&lt;</span><span class="n">U</span><span class="o">&gt;</span><span class="w">
-</span><span class="w"></span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">context</span><span class="w">
-</span><span class="w">    </span><span class="p">.</span><span class="n">value_stack_mut</span><span class="p">()</span><span class="w">
-</span><span class="w">    </span><span class="p">.</span><span class="n">pop_as</span>::<span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">();</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v</span><span class="p">.</span><span class="n">transmute_into</span><span class="p">();</span><span class="w">
-</span><span class="w">  </span><span class="c1">//      ^-This call here-^
-</span><span class="c1"></span><span class="w">
-</span><span class="w">  </span><span class="n">context</span><span class="p">.</span><span class="n">value_stack_mut</span><span class="p">().</span><span class="n">push</span><span class="p">(</span><span class="n">v</span><span class="p">.</span><span class="n">into</span><span class="p">())</span><span class="o">?</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w">  </span><span class="nb">Ok</span><span class="p">(</span><span class="n">InstructionOutcome</span>::<span class="n">RunNextInstruction</span><span class="p">)</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>That <code>v.transmute_into()</code> call was returning <code>0x7fe00000</code> instead of <code>0x7fa00000</code>! Hang on, like the name implies, <code>v.transmute_into()</code> should just be a transmute, it should just reinterpret the bits. I looked at the source code, and sure enough:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">impl</span><span class="w"> </span><span class="n">TransmuteInto</span><span class="o">&lt;</span><span class="kt">f32</span><span class="o">&gt;</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="kt">i32</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="k">fn</span> <span class="nf">transmute_into</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">f32</span> <span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kt">f32</span>::<span class="n">from_bits</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="w">
-</span><span class="w">  </span><span class="p">}</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>We&rsquo;re back where we started. As we saw before, <code>f32::from_bits</code> is just a transmute. Originally I thought it was an old version of the standard library, so I wrote a quick test:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">use</span><span class="w"> </span><span class="n">test</span>::<span class="n">black_box</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">bb</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="cp">#[test]</span><span class="w">
-</span><span class="w"></span><span class="k">fn</span> <span class="nf">it_works</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">  </span><span class="n">assert_eq</span><span class="o">!</span><span class="p">(</span><span class="w">
-</span><span class="w">    </span><span class="n">bb</span><span class="p">(</span><span class="mh">0xffa00000</span><span class="p">),</span><span class="w">
-</span><span class="w">    </span><span class="n">bb</span><span class="p">(</span><span class="w">
-</span><span class="w">      </span><span class="n">bb</span><span class="p">(</span><span class="kt">f32</span>::<span class="n">from_bits</span><span class="p">(</span><span class="n">bb</span><span class="p">(</span><span class="mh">0xffa00000</span><span class="p">)))</span><span class="w">
-</span><span class="w">        </span><span class="p">.</span><span class="n">to_bits</span><span class="p">()</span><span class="w">
-</span><span class="w">    </span><span class="p">)</span><span class="w">
-</span><span class="w">  </span><span class="p">);</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>The <code>black_box</code>/<code>bb</code> function just ensures that the compiler doesn&rsquo;t optimise anything out. This particular test succeeds, though, even on x86 (i.e. 32-bit, the same architecture where our <code>wasmi</code> test suite fails). So I went back to <code>f32::from_bits</code> in the compiled output for <code>wasmi</code> and disassembled it with LLDB.</p>
-<div class="highlight"><pre class="chroma"><code class="language-gas" data-lang="gas"><span class="nl">core:</span><span class="err">:</span><span class="nl">f32:</span><span class="err">:&lt;</span><span class="nf">impl</span> <span class="no">core</span><span class="p">::</span><span class="no">num</span><span class="p">::</span><span class="no">Float</span> <span class="no">for</span> <span class="no">f32</span><span class="err">&gt;</span><span class="p">::</span><span class="no">from_bits</span><span class="p">:</span>
-  <span class="nf">pushl</span>  <span class="nv">%ebp</span>
-  <span class="nf">movl</span>   <span class="nv">%esp</span><span class="p">,</span>        <span class="nv">%ebp</span>
-  <span class="nf">subl</span>   <span class="no">$0x10</span><span class="p">,</span>       <span class="nv">%esp</span>
-  <span class="nf">movl</span>   <span class="mi">0x8</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">),</span>   <span class="nv">%eax</span>
-  <span class="nf">movl</span>   <span class="mi">0x8</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">),</span>   <span class="nv">%ecx</span>
-  <span class="nf">movl</span>   <span class="nv">%ecx</span><span class="p">,</span>        <span class="p">-</span><span class="mi">0x4</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">)</span>
-  <span class="nf">movss</span>  <span class="p">-</span><span class="mi">0x4</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">),</span>  <span class="nv">%xmm0</span>
-  <span class="nf">movl</span>   <span class="nv">%eax</span><span class="p">,</span>        <span class="p">-</span><span class="mi">0xc</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">)</span>
-  <span class="nf">movss</span>  <span class="nv">%xmm0</span><span class="p">,</span>       <span class="p">-</span><span class="mi">0x10</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">)</span>
-  <span class="nf">movss</span>  <span class="p">-</span><span class="mi">0x10</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">),</span> <span class="nv">%xmm0</span>
-  <span class="nf">movss</span>  <span class="nv">%xmm0</span><span class="p">,</span>       <span class="p">-</span><span class="mi">0x8</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">)</span>
-  <span class="nf">flds</span>   <span class="p">-</span><span class="mi">0x8</span><span class="p">(</span><span class="nv">%ebp</span><span class="p">)</span>
-  <span class="nf">addl</span>   <span class="no">$0x10</span><span class="p">,</span>       <span class="nv">%esp</span>
-  <span class="nf">popl</span>   <span class="nv">%ebp</span>
-  <span class="nf">retl</span>   
-</code></pre></div><p>At first glance, that looks like it&rsquo;s doing a bunch more stuff than just a transmute, but it&rsquo;s actually just moving data about because the test harness is compiled without optimisations by default. If you turn optimisations on, this just compiles to:</p>
-<div class="highlight"><pre class="chroma"><code class="language-gas" data-lang="gas"><span class="nl">core:</span><span class="err">:</span><span class="nl">f32:</span><span class="err">:&lt;</span><span class="nf">impl</span> <span class="no">core</span><span class="p">::</span><span class="no">num</span><span class="p">::</span><span class="no">Float</span> <span class="no">for</span> <span class="no">f32</span><span class="err">&gt;</span><span class="p">::</span><span class="no">from_bits</span><span class="p">:</span>
-  <span class="nf">flds</span>   <span class="mi">0x4</span><span class="p">(</span><span class="nv">%esp</span><span class="p">)</span>
-  <span class="nf">retl</span>   
-</code></pre></div><p>Hang on, what&rsquo;s this <code>flds</code> instruction? We see it in the debug version above, too. It&rsquo;s not there if you disassemble the build for 64-bit:</p>
-<div class="highlight"><pre class="chroma"><code class="language-gas" data-lang="gas"><span class="nl">core:</span><span class="err">:</span><span class="nl">f32:</span><span class="err">:&lt;</span><span class="nf">impl</span> <span class="no">core</span><span class="p">::</span><span class="no">num</span><span class="p">::</span><span class="no">Float</span> <span class="no">for</span> <span class="no">f32</span><span class="err">&gt;</span><span class="p">::</span><span class="no">from_bits</span><span class="p">:</span>
-  <span class="nf">movd</span>   <span class="nv">%edi</span><span class="p">,</span> <span class="nv">%xmm0</span>
-  <span class="nf">retq</span>   
-</code></pre></div><p>So what does it do? I&rsquo;m pretty familiar with x86 assembly, but I&rsquo;d never seen this instruction before. Googling it brings up <a href="https://c9x.me/x86/html/file_module_x86_id_100.html">this page in the x86 reference</a>, which says that it pushes the argument onto the FPU register stack. See, what most people call x86 is actually an extension known as <a href="https://en.wikipedia.org/wiki/X87">x87</a>, which implementes floating point operations on top of x86. One common <a href="https://en.wikipedia.org/wiki/X86_calling_conventions">calling convention</a> for x87 is to return integer arguments in <code>%eax</code> and floating point arguments on the FPU stack, using the <code>fstps</code> instruction to load the returned value after control is returned to the caller. This is what <code>flds</code> is doing here, returning the argument as a float. Ah, but whenever the CPU operates on a float it&rsquo;s allowed to quieten it, and sure enough <code>fld</code> quietens sNaNs that were passed to it. With LLDB we can read the state of the registers and memory, so let&rsquo;s check out what happens between <code>flds</code> and <code>fstps</code>.</p>
-<pre><code>(lldb) run
+</code></pre></div><div class="code-light"><pre><code>Expected: 0b11111111010000000000000000000000000
+Got:      0b11111111110000000000000000000000000
+                    ^ This bit is different
+</code></pre></div><p>That’s right, it’s the <a href="https://en.wikipedia.org/wiki/NaN#Signaling_NaN">quiet bit</a>! For those unaware, the quiet bit determines whether or not the number should raise an exception when you attempt to use it. This is because the <a href="https://en.wikipedia.org/wiki/IEEE_754">IEEE 754 standard</a> was written at a time when it wasn’t necessarily expected that a programming language would include exceptions. The standard includes provisions to allow hardware-level exceptions when, for example, dividing zero by zero. The idea is that when the hardware tries to execute an invalid floating point operation it is allowed to generate a “signalling NaN”, or sNaN. This is what we see above - the quiet bit is set to 0, meaning that the NaN is signalling <a id="ft-ref-8-1" href="#ft-note-8-1"><sup>1</sup></a> . When you try to use this value (for example, by multiplying it with another number) the hardware is allowed to generate an exception and then return a “quiet NaN”, or qNaN, which has the quiet bit set to 1. I say “allowed to” rather than “does” or “should” because IEEE 754 leaves this unspecified, and in fact as far as I can tell x86 and ARM never generate sNaNs, the only way to create them is to reinterpret an integer with the signalling bit set. Originally, I thought the source of the problem was obvious: <a href="https://github.com/rust-lang/rust/pull/39271">Rust was quieting NaN when casting an int to a float</a>. I remember seeing <a href="https://github.com/tomaka">tomaka</a>’s <a id="ft-ref-8-2" href="#ft-note-8-2"><sup>2</sup></a> talk at RustFest 2017 on binding C libraries where he mentioned that Rust guarantees that all NaNs are quiet and that you have to explicitly handle that when using floats returned from C (where sNaNs are allowed). So I checked the source of <code>f32::from_bits</code> and… <a href="https://github.com/rust-lang/rust/blob/8010604b2d888ac839147fe27de76cdcc713aa1b/src/libcore/num/f32.rs#L270-L275">nope</a>. It just does a normal reintepret. Turns out tomaka’s advice was out of date, and Rust <a href="https://github.com/rust-lang/rust/pull/46012/commits/439576fd7bedf741db5fb6a21c902e858d51f2a0">now allows sNaNs</a></p><p>So the hunt was on - where are we operating on this float value? Looking at the code it looked like we just take the number directly from the WebAssembly bytecode and interpret it as a float, no operations required. The bytecode must be correct - after all, the same code compiled for 64-bit worked correctly, and they both read the same bytecode. Since reading the code wasn’t helping me at all, I opened up the LLDB debugger <a id="ft-ref-8-3" href="#ft-note-8-3"><sup>3</sup></a> and attached it to the test binary that is output by <code>cargo test --no-run</code>. Stepping through functions and checking their return value, I eventually found the culprit:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">run_reinterpret</span>&lt;T, U>(
+  <span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> <span style="color: #bd5eff">self</span>,
+  <span style="color: #bd5eff">context</span>: <span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> FunctionContext
+) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #bd5eff">Result</span><span style="color: #bd5eff">&lt;</span><span style="color: #bd5eff">InstructionOutcome, TrapKind</span><span style="color: #bd5eff">></span>
+<span style="color: #ffbd5e">where</span>
+  RuntimeValue: <span style="color: #bd5eff">From</span>&lt;U>,
+  T: FromRuntimeValue,
+  T: TransmuteInto&lt;U>
+{
+  <span style="color: #5ef1ff">let</span> v <span style="color: #bd5eff">=</span> context
+    <span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">value_stack_mut</span>()
+    <span style="color: #ff5ea0">.</span><span style="color: #5ef1ff">pop_as</span><span style="color: #ff5ea0">::</span>&lt;T>();
+
+  <span style="color: #5ef1ff">let</span> v <span style="color: #bd5eff">=</span> v<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">transmute_into</span>();
+  <span style="color: #7b8496">//</span><span style="color: #7b8496">      ^-This call here-^</span>
+
+  context<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">value_stack_mut</span>()<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">push</span>(v<span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">into</span>())<span style="color: #bd5eff">?</span>;
+
+  <span style="color: #bd5eff">Ok</span>(<span style="color: #5ef1ff">InstructionOutcome</span><span style="color: #ff5ea0">::</span>RunNextInstruction)
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">fn</span> <span style="color: #0057d1">run_reinterpret</span>&lt;T, U>(
+  <span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> <span style="color: #a018ff">self</span>,
+  <span style="color: #a018ff">context</span>: <span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> FunctionContext
+) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #a018ff">Result</span><span style="color: #a018ff">&lt;</span><span style="color: #a018ff">InstructionOutcome, TrapKind</span><span style="color: #a018ff">></span>
+<span style="color: #d17c00">where</span>
+  RuntimeValue: <span style="color: #a018ff">From</span>&lt;U>,
+  T: FromRuntimeValue,
+  T: TransmuteInto&lt;U>
+{
+  <span style="color: #008c99">let</span> v <span style="color: #a018ff">=</span> context
+    <span style="color: #f40064">.</span><span style="color: #0057d1">value_stack_mut</span>()
+    <span style="color: #f40064">.</span><span style="color: #008c99">pop_as</span><span style="color: #f40064">::</span>&lt;T>();
+
+  <span style="color: #008c99">let</span> v <span style="color: #a018ff">=</span> v<span style="color: #f40064">.</span><span style="color: #0057d1">transmute_into</span>();
+  <span style="color: #7b8496">//</span><span style="color: #7b8496">      ^-This call here-^</span>
+
+  context<span style="color: #f40064">.</span><span style="color: #0057d1">value_stack_mut</span>()<span style="color: #f40064">.</span><span style="color: #0057d1">push</span>(v<span style="color: #f40064">.</span><span style="color: #0057d1">into</span>())<span style="color: #a018ff">?</span>;
+
+  <span style="color: #a018ff">Ok</span>(<span style="color: #008c99">InstructionOutcome</span><span style="color: #f40064">::</span>RunNextInstruction)
+}
+</code></pre></div><p>That <code>v.transmute_into()</code> call was returning <code>0x7fe00000</code> instead of <code>0x7fa00000</code>! Hang on, like the name implies, <code>v.transmute_into()</code> should just be a transmute, it should just reinterpret the bits. I looked at the source code, and sure enough:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">impl</span> TransmuteInto&lt;<span style="color: #5ef1ff">f32</span>> <span style="color: #ffbd5e">for</span> i32 {
+  <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">transmute_into</span>(<span style="color: #bd5eff">self</span>) <span style="color: #bd5eff">-></span><span style="color: #bd5eff"> </span><span style="color: #5ef1ff">f32</span> {
+    <span style="color: #5ef1ff">f32</span><span style="color: #ff5ea0">::</span>from_bits(<span style="color: #bd5eff">self</span>)
+  }
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">impl</span> TransmuteInto&lt;<span style="color: #008c99">f32</span>> <span style="color: #d17c00">for</span> i32 {
+  <span style="color: #008c99">fn</span> <span style="color: #0057d1">transmute_into</span>(<span style="color: #a018ff">self</span>) <span style="color: #a018ff">-></span><span style="color: #a018ff"> </span><span style="color: #008c99">f32</span> {
+    <span style="color: #008c99">f32</span><span style="color: #f40064">::</span>from_bits(<span style="color: #a018ff">self</span>)
+  }
+}
+</code></pre></div><p>We’re back where we started. As we saw before, <code>f32::from_bits</code> is just a transmute. Originally I thought it was an old version of the standard library, so I wrote a quick test:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ffbd5e">use</span> <span style="color: #5ef1ff">test</span><span style="color: #ff5ea0">::</span>black_box <span style="color: #bd5eff">as</span> bb;
+
+#[test]
+<span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">it_works</span>() {
+  assert_eq!(
+    <span style="color: #5ea1ff">bb</span>(0xffa00000),
+    <span style="color: #5ea1ff">bb</span>(
+      <span style="color: #5ea1ff">bb</span>(<span style="color: #5ef1ff">f32</span><span style="color: #ff5ea0">::</span>from_bits(<span style="color: #5ea1ff">bb</span>(0xffa00000)))
+        <span style="color: #ff5ea0">.</span><span style="color: #5ea1ff">to_bits</span>()
+    )
+  );
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #d17c00">use</span> <span style="color: #008c99">test</span><span style="color: #f40064">::</span>black_box <span style="color: #a018ff">as</span> bb;
+
+#[test]
+<span style="color: #008c99">fn</span> <span style="color: #0057d1">it_works</span>() {
+  assert_eq!(
+    <span style="color: #0057d1">bb</span>(0xffa00000),
+    <span style="color: #0057d1">bb</span>(
+      <span style="color: #0057d1">bb</span>(<span style="color: #008c99">f32</span><span style="color: #f40064">::</span>from_bits(<span style="color: #0057d1">bb</span>(0xffa00000)))
+        <span style="color: #f40064">.</span><span style="color: #0057d1">to_bits</span>()
+    )
+  );
+}
+</code></pre></div><p>The <code>black_box</code>/<code>bb</code> function just ensures that the compiler doesn’t optimise anything out. This particular test succeeds, though, even on x86 (i.e. 32-bit, the same architecture where our <code>wasmi</code> test suite fails). So I went back to <code>f32::from_bits</code> in the compiled output for <code>wasmi</code> and disassembled it with LLDB.</p><div class="code-dark"><pre><code data-lang="gas">core::f32::&lt;impl core::num::Float for f32>::from_bits:
+  pushl  %ebp
+  movl   %esp,        %ebp
+  subl   $0x10,       %esp
+  movl   0x8(%ebp),   %eax
+  movl   0x8(%ebp),   %ecx
+  movl   %ecx,        -0x4(%ebp)
+  movss  -0x4(%ebp),  %xmm0
+  movl   %eax,        -0xc(%ebp)
+  movss  %xmm0,       -0x10(%ebp)
+  movss  -0x10(%ebp), %xmm0
+  movss  %xmm0,       -0x8(%ebp)
+  flds   -0x8(%ebp)
+  addl   $0x10,       %esp
+  popl   %ebp
+  retl   
+</code></pre></div><div class="code-light"><pre><code data-lang="gas">core::f32::&lt;impl core::num::Float for f32>::from_bits:
+  pushl  %ebp
+  movl   %esp,        %ebp
+  subl   $0x10,       %esp
+  movl   0x8(%ebp),   %eax
+  movl   0x8(%ebp),   %ecx
+  movl   %ecx,        -0x4(%ebp)
+  movss  -0x4(%ebp),  %xmm0
+  movl   %eax,        -0xc(%ebp)
+  movss  %xmm0,       -0x10(%ebp)
+  movss  -0x10(%ebp), %xmm0
+  movss  %xmm0,       -0x8(%ebp)
+  flds   -0x8(%ebp)
+  addl   $0x10,       %esp
+  popl   %ebp
+  retl   
+</code></pre></div><p>At first glance, that looks like it’s doing a bunch more stuff than just a transmute, but it’s actually just moving data about because the test harness is compiled without optimisations by default. If you turn optimisations on, this just compiles to:</p><div class="code-dark"><pre><code data-lang="gas">core::f32::&lt;impl core::num::Float for f32>::from_bits:
+  flds   0x4(%esp)
+  retl   
+</code></pre></div><div class="code-light"><pre><code data-lang="gas">core::f32::&lt;impl core::num::Float for f32>::from_bits:
+  flds   0x4(%esp)
+  retl   
+</code></pre></div><p>Hang on, what’s this <code>flds</code> instruction? We see it in the debug version above, too. It’s not there if you disassemble the build for 64-bit:</p><div class="code-dark"><pre><code data-lang="gas">core::f32::&lt;impl core::num::Float for f32>::from_bits:
+  movd   %edi, %xmm0
+  retq   
+</code></pre></div><div class="code-light"><pre><code data-lang="gas">core::f32::&lt;impl core::num::Float for f32>::from_bits:
+  movd   %edi, %xmm0
+  retq   
+</code></pre></div><p>So what does it do? I’m pretty familiar with x86 assembly, but I’d never seen this instruction before. Googling it brings up <a href="https://c9x.me/x86/html/file_module_x86_id_100.html">this page in the x86 reference</a>, which says that it pushes the argument onto the FPU register stack. See, what most people call x86 is actually an extension known as <a href="https://en.wikipedia.org/wiki/X87">x87</a>, which implementes floating point operations on top of x86. One common <a href="https://en.wikipedia.org/wiki/X86_calling_conventions">calling convention</a> for x87 is to return integer arguments in <code>%eax</code> and floating point arguments on the FPU stack, using the <code>fstps</code> instruction to load the returned value after control is returned to the caller. This is what <code>flds</code> is doing here, returning the argument as a float. Ah, but whenever the CPU operates on a float it’s allowed to quieten it, and sure enough <code>fld</code> quietens sNaNs that were passed to it. With LLDB we can read the state of the registers and memory, so let’s check out what happens between <code>flds</code> and <code>fstps</code>.</p><div class="code-dark"><pre><code>(lldb) run
 ## SNIP ##
--&gt;  0x5655b5e0 &lt;+0&gt;: flds   0x4(%esp)
-    0x5655b5e4 &lt;+4&gt;: retl   
+->  0x5655b5e0 &lt;+0>: flds   0x4(%esp)
+    0x5655b5e4 &lt;+4>: retl   
 ## SNIP ##
-</code></pre><p>You can see that we&rsquo;ve stopped on our problematic <code>flds</code> instruction. Let&rsquo;s check out the data pointed to by <code>0x4(%esp)</code> (i.e. <code>%esp</code> plus <code>0x4</code>).</p>
-<pre><code>(lldb) register read esp
+</code></pre></div><div class="code-light"><pre><code>(lldb) run
+## SNIP ##
+->  0x5655b5e0 &lt;+0>: flds   0x4(%esp)
+    0x5655b5e4 &lt;+4>: retl   
+## SNIP ##
+</code></pre></div><p>You can see that we’ve stopped on our problematic <code>flds</code> instruction. Let’s check out the data pointed to by <code>0x4(%esp)</code> (i.e. <code>%esp</code> plus <code>0x4</code>).</p><div class="code-dark"><pre><code>(lldb) register read esp
     esp = 0xf77fee3c
 (lldb) x/xw '0xf77fee3c + 0x4'
 0xf77fee40: 0xffa00000
-</code></pre><p>There we go, that&rsquo;s our signalling NaN. So it&rsquo;s passed into the function OK. Let&rsquo;s see what happens in the calling code:</p>
-<pre><code>(lldb) si
+</code></pre></div><div class="code-light"><pre><code>(lldb) register read esp
+    esp = 0xf77fee3c
+(lldb) x/xw '0xf77fee3c + 0x4'
+0xf77fee40: 0xffa00000
+</code></pre></div><p>There we go, that’s our signalling NaN. So it’s passed into the function OK. Let’s see what happens in the calling code:</p><div class="code-dark"><pre><code>(lldb) si
 ## SNIP ##
--&gt;  0x5655b55c &lt;+44&gt;: fstps  0x14(%esp)
-    0x5655b560 &lt;+48&gt;: addl   $0x18, %esp
-    0x5655b563 &lt;+51&gt;: popl   %ebx
-    0x5655b564 &lt;+52&gt;: retl   
-</code></pre><p>So we&rsquo;re taking the top of the floating point stack and storing it in <code>0x14(%esp)</code>. Let&rsquo;s step one more time (to let the <code>fstps</code> instruction run) and read the value of that memory address:</p>
-<pre><code>(lldb) si
+->  0x5655b55c &lt;+44>: fstps  0x14(%esp)
+    0x5655b560 &lt;+48>: addl   $0x18, %esp
+    0x5655b563 &lt;+51>: popl   %ebx
+    0x5655b564 &lt;+52>: retl   
+</code></pre></div><div class="code-light"><pre><code>(lldb) si
 ## SNIP ##
--&gt;  0x5655b560 &lt;+48&gt;: addl   $0x18, %esp
-    0x5655b563 &lt;+51&gt;: popl   %ebx
-    0x5655b564 &lt;+52&gt;: retl   
+->  0x5655b55c &lt;+44>: fstps  0x14(%esp)
+    0x5655b560 &lt;+48>: addl   $0x18, %esp
+    0x5655b563 &lt;+51>: popl   %ebx
+    0x5655b564 &lt;+52>: retl   
+</code></pre></div><p>So we’re taking the top of the floating point stack and storing it in <code>0x14(%esp)</code>. Let’s step one more time (to let the <code>fstps</code> instruction run) and read the value of that memory address:</p><div class="code-dark"><pre><code>(lldb) si
+## SNIP ##
+->  0x5655b560 &lt;+48>: addl   $0x18, %esp
+    0x5655b563 &lt;+51>: popl   %ebx
+    0x5655b564 &lt;+52>: retl   
     0x5655b565:       nop    
 (lldb) register read esp
      esp = 0xf77fee40
 (lldb) x/xw '0xf77fee40 + 0x14'
 0xf77fee54: 0xffe00000
-</code></pre><p>There we go, that&rsquo;s a quiet NaN. That&rsquo;s the first time that I&rsquo;ve seen <em>the very act of returning something from a function</em> cause tests to fail where they would have succeeded if it had been done inline.</p>
-<p>So the solution? I wrote <a href="https://github.com/Vurich/nan-preserving-float/blob/master/src/lib.rs">a wrapper around <code>u32</code>/<code>u64</code></a> that converts to <code>f32</code>/<code>f64</code> when doing operations. This essentially fools the CPU into thinking that these values are integers unless it&rsquo;s doing binary operations on them, and so when you pass them in and out of functions it uses the <code>%eax</code> register and preserves their bit patterns. Since WebAssembly requires that you quieten NaNs when doing binary operations, this doesn&rsquo;t cause a problem.</p>
-<p>If I&rsquo;ve learned anything from this, it&rsquo;s that no matter how close to the metal you go, you can never truly have total control over the execution of your code. I truly believe that the ability to do CPU-level debugging and to read disassembly is still important even in the age of high-level languages, because <a href="https://www.joelonsoftware.com/2002/11/11/the-law-of-leaky-abstractions/">all abstractions are leaky</a>.</p>
-<section class="footnotes" role="doc-endnotes">
-<hr>
-<ol>
-<li id="fn:1" role="doc-endnote">
-<p>Quick note: this is only true for x86, the IEEE 754 spec leaves it unspecified whether 0 or 1 represents signalling, as long as the bit mask is the same (<code>1 &lt;&lt; (sizeof(float) * 8 - 6)</code>). Why they thought it was necessary to leave this unspecified instead of just picking one and sticking with it is beyond me. Maybe on some CPUs it&rsquo;s faster to unset a bit and on others it&rsquo;s faster to set it (let&rsquo;s be real here though, probably not). <a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:2" role="doc-endnote">
-<p>Tomaka inspired the name of this blog with his file <a href="https://github.com/vulkano-rs/vulkano/blob/master/TROUBLES.md">TROUBLES.md</a>. I originally bought this domain because he mentioned that he was annoyed that TROUBLES.md kept being brought up in discussions about Rust language design. Yeah, this blog basically started as a way for me to troll my mate. <a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:3" role="doc-endnote">
-<p>Yes, <a href="https://lldb.llvm.org/">that&rsquo;s the official name</a>, assumably DB stands for something other than debugger, like decibel or Deutsche Bahn. <a href="#fnref:3" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-</ol>
-</section>
-
-</div>
-
-<footer>
-	<p>© 2017-2018, all rights reserved.</a>
-</footer>
-</body>
-</html>
+</code></pre></div><div class="code-light"><pre><code>(lldb) si
+## SNIP ##
+->  0x5655b560 &lt;+48>: addl   $0x18, %esp
+    0x5655b563 &lt;+51>: popl   %ebx
+    0x5655b564 &lt;+52>: retl   
+    0x5655b565:       nop    
+(lldb) register read esp
+     esp = 0xf77fee40
+(lldb) x/xw '0xf77fee40 + 0x14'
+0xf77fee54: 0xffe00000
+</code></pre></div><p>There we go, that’s a quiet NaN. That’s the first time that I’ve seen <em>the very act of returning something from a function</em> cause tests to fail where they would have succeeded if it had been done inline.</p><p>So the solution? I wrote <a href="https://github.com/Vurich/nan-preserving-float/blob/master/src/lib.rs">a wrapper around <code>u32</code>/<code>u64</code></a> that converts to <code>f32</code>/<code>f64</code> when doing operations. This essentially fools the CPU into thinking that these values are integers unless it’s doing binary operations on them, and so when you pass them in and out of functions it uses the <code>%eax</code> register and preserves their bit patterns. Since WebAssembly requires that you quieten NaNs when doing binary operations, this doesn’t cause a problem.</p><p>If I’ve learned anything from this, it’s that no matter how close to the metal you go, you can never truly have total control over the execution of your code. I truly believe that the ability to do CPU-level debugging and to read disassembly is still important even in the age of high-level languages, because <a href="https://www.joelonsoftware.com/2002/11/11/the-law-of-leaky-abstractions/">all abstractions are leaky</a>.</p><section class="footnotes" role="doc-endnotes"><hr><ol><li id="ft-note-8-1"><p>Quick note: this is only true for x86, the IEEE 754 spec leaves it unspecified whether 0 or 1 represents signalling, as long as the bit mask is the same (<code>1 &lt;&lt; (sizeof(float) * 8 - 6)</code>). Why they thought it was necessary to leave this unspecified instead of just picking one and sticking with it is beyond me. Maybe on some CPUs it’s faster to unset a bit and on others it’s faster to set it (let’s be real here though, probably not).</p><div class="ft-return-link"><a href="#ft-ref-8-1">↩︎</a></div></li><li id="ft-note-8-2"><p>Tomaka inspired the name of this blog with his file <a href="https://github.com/vulkano-rs/vulkano/blob/master/TROUBLES.md">TROUBLES.md</a>. I originally bought this domain because he mentioned that he was annoyed that TROUBLES.md kept being brought up in discussions about Rust language design. Yeah, this blog basically started as a way for me to troll my mate.</p><div class="ft-return-link"><a href="#ft-ref-8-2">↩︎</a></div></li><li id="ft-note-8-3"><p>Yes, <a href="https://lldb.llvm.org/">that’s the official name</a>, assumably DB stands for something other than debugger, like decibel or Deutsche Bahn.</p><div class="ft-return-link"><a href="#ft-ref-8-3">↩︎</a></div></li></ol></section></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>

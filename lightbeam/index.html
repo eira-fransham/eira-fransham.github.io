@@ -1,186 +1,699 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler</title>
-    
-    <meta name="description" content="">
-    
-    <meta itemprop="name" content="Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler">
-    
-    
-    <meta name="og:title" content="Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler">
-    
-        <meta name="image" content="http://troubles.md/floppies.png">
-        <meta name="og:image" content="http://troubles.md/floppies.png">
-       <meta name="og:url" content="http://troubles.md/lightbeam/">
-    <meta name="og:site_name" content="Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler">
-    <meta name="og:type" content="article">
-    
-    <meta name="article:tag" content="">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/style.css">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/syntax.css">
-    <script async>
-        window.onload = function() {
-            var possibilities = [
-                 "A high-level view of low-level code",  "Writing words and reading DWORDS", 
-            ];
+<!DOCTYPE html><html><head><meta name="og:type" content="article"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="og:title" content="Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler"><meta itemprop="name" content="Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler"><meta name="image" content="floppies.png"><meta name="og:image" content="floppies.png"><title>Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler - troubles.md</title><style rel="stylesheet" type="text/css">@import url("https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square");
 
-            document.getElementById('subtitle').innerHTML = possibilities[Math.floor(possibilities.length * Math.random())];
-        };
-    </script>
-</head>
+/* Light theme by default */
+:root {
+    --main-header-font: "Bevan", monospace;
+    --secondary-header-font: "Sanchez", monospace;
+    --body-font: "Lato", sans-serif;
+    --code-font: "Cascadia Mono", monospace;
+    --default-inset: 11pt;
+    --expanded-inset: 20pt;
+    --title-inset: 28pt;
+    --background-color: #fff;
+    --header-font-color: #777;
+    --font-color: #000;
+    --pre-font-color: #333;
+    --date-color: #667;
+    --code-background-color: #f7f7f7;
+    --accent-color: #0594cb;
+}
 
-<body>
+@counter-style custom {
+    system: cyclic;
+    symbols: "┃";
+    suffix: " ";
+}
 
-<header>
-    
-    <span>
-        <a href="http://troubles.md/" class="title"><strong>troubles.md</strong></a>
-        <span class="dash"> - </span><p id="subtitle" class="subtitle">A high-level view of low-level code</p>
-        
-        
-    </span>
-    
-    <a class="rss" href="http://troubles.md/index.xml">
-        <strong>
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="feather feather-rss"
-            >
-                <path d="M4 11a9 9 0 0 1 9 9">
-                </path>
-                <path d="M4 4a16 16 0 0 1 16 16">
-                </path>
-                <circle cx="5" cy="19" r="1">
-                </circle>
-            </svg>
-        </strong>
-    </a>
-</header>
+.code-dark {
+    display: none;
+}
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #252525;
+        --header-font-color: #aaa;
+        --font-color: #eee;
+        --pre-font-color: #bababa;
+        --date-color: #999;
+        --code-background-color: #333;
+    }
 
-<div class="content">
-  <h1>Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler <aside></aside></h1>
-  <p><a href="https://github.com/CraneStation/lightbeam">Lightbeam</a> is a new streaming compiler for WebAssembly, designed to produce the best possible assembly while still being fast enough to produce assembly faster than the WebAssembly is received over the wire.</p>
-<p>WebAssembly was designed for streaming compilation, and even from its first public release there was a streaming implementation - <a href="https://hacks.mozilla.org/2018/01/making-webassembly-even-faster-firefoxs-new-streaming-and-tiering-compiler/">Firefox has had its own optimising streaming compiler for a long time</a> and V8 has LiftOff.</p>
-<p>Lightbeam is similar in concept, but has a different internal mechanism which leads to surprisingly high-quality code considering the constraints, and I&rsquo;ll explain how it works in this article.</p>
-<h2 id="lightbeam">Lightbeam</h2>
-<p>Lightbeam is intended for use as the initial compiler in <a href="https://github.com/CraneStation/lightbeam">Wasmtime</a> and as the main compilation engine for <a href="https://github.com/paritytech/substrate">Substrate</a>&lsquo;s smart contract subsystem.</p>
-<p>In relation to the latter, you might have some questions: Why do we need a compiler for our smart contracts? What even are smart contracts? We really want to put a compiler in a blockchain client? For answers to these questions and more you can check out <a href="http://troubles.md/why-wasm/">my article about WebAssembly on the blockchain</a>, but it&rsquo;s not particularly important for the purposes of this article.</p>
-<p>What is important is how WebAssembly works and how we can work around its limitations to produce high-quality code in a streaming compiler.</p>
-<h2 id="streaming-compilation">Streaming compilation</h2>
-<p>So I&rsquo;m not going to go too deep into this since Lin Clark has <a href="https://hacks.mozilla.org/2018/01/making-webassembly-even-faster-firefoxs-new-streaming-and-tiering-compiler/">already covered this much more thoroughly</a> than I can, but here&rsquo;s the pitch. If you want to have fast startup times for a program, you have a few options, each with their own pros and cons:</p>
-<ul>
-<li>Distribute the program as machine code
-<ul>
-<li>Pros: Very fast, predictable performance</li>
-<li>Cons: Massively insecure, can&rsquo;t use <a href="https://en.wikipedia.org/wiki/SSE4">microarchitecture-specific opcodes</a> without extra complexity and runtime checks, must distribute separate versions of the program for each target platform</li>
-</ul>
-</li>
-<li>Distribute bytecode and use an interpreter
-<ul>
-<li>Pros: Easy to implement, easy to debug, easy to add extra functionality, easy to ensure correctness, easy to write a convenient API, 100% thread- and memory-safe by default, portable to any platform that the host language is</li>
-<li>Cons: Slow (really, really slow)</li>
-</ul>
-</li>
-<li>Distribute bytecode and use a JIT
-<ul>
-<li>Pros: Very fast startup and execution, can lazily compile functions (so unused functions are never compiled), can take advantage of host microarchitecture, can do <a href="https://www.slideshare.net/ZeroTurnaround/vladimir-ivanovjvmjitcompilationoverview-24613146">incredibly powerful optimisation techniques</a> that are impossible with ahead-of-time compilation</li>
-<li>Cons: Easily the most complex option, no thread- or memory-safety by default, good average-case startup but without extremely careful implementation can have very bad worst-case startup time, must implement a different backend for each target architecture</li>
-</ul>
-</li>
-<li>Distribute bytecode and use streaming compilation
-<ul>
-<li>Pros: Can give very good performance with good bytecode design, relatively easy to ensure worst-case startup time is low, can take advantage of host microarchitecture</li>
-<li>Cons: Must implement a different backend for each target architecture, no thread- or memory-safety by default, need to design bytecode around constraints of streaming compilation</li>
-</ul>
-</li>
-</ul>
-<p>The main reason we decided to use a streaming compiler at Parity is that the strict bounds on compilation time are necessary in the context of the blockchain, currently we use <a href="https://github.com/paritytech/wasmi">our own in-house WebAssembly interpreter</a>.</p>
-<p>Any one of these can be combined with a slower but more-powerful compiler that works in the background as the more immediate method of execution is running the program, with execution switching to the output of the heavyweight compiler when it&rsquo;s ready.</p>
-<h2 id="webassembly-primer">WebAssembly primer</h2>
-<p>So to explain what Lightbeam does internally, I need to explain a few things about WebAssembly. WebAssembly is a weird middle-ground between a high-level language and a more traditional bytecode. It is a bytecode in that it&rsquo;s a <a href="https://en.wikipedia.org/wiki/Stack_machine">stack machine</a>, canonically represented as a series of opcodes instead of using a text-based format, but it has many high-level features that are rarely seen in bytecodes, like having hierarchical blocks using <code>block...end</code> that you can break out of, a separate block type for blocks that you can jump to the end of and blocks that you can jump to the start of, and an <code>if..else..end</code> construct instead of a using more traditional &ldquo;test-and-jump&rdquo; instruction (it <em>also</em> has a test-and-jump instruction, but you <a href="http://troubles.md/why-do-we-need-the-relooper-algorithm-again/">currently can&rsquo;t use it to emulate if statements</a>). Plus, it has &ldquo;locals&rdquo;, a concept similar to variables in most high-level languages. These locals are <a href="http://troubles.md/wasm-is-not-a-stack-machine/">actually more trouble than they&rsquo;re worth</a>, however, they&rsquo;re more an artifact of WebAssembly&rsquo;s history than a useful feature.</p>
-<p>So although WebAssembly is designed to be easily compiled and easily compiled with a streaming compiler, it&rsquo;s actually pretty non-trivial to generate optimal code from WebAssembly directly. That&rsquo;s why Lightbeam doesn&rsquo;t.</p>
-<h2 id="gotta-go-fast">Gotta Go Fast</h2>
-<p>So, how does Lightbeam get such good code? Well, there&rsquo;s lots of small optimisations that make it possible, but we start by converting to an <a href="https://en.wikipedia.org/wiki/Static_single_assignment_form">SSA</a>, <a href="https://en.wikipedia.org/wiki/Control-flow_graph">CFG</a> intermediate representation like a &ldquo;normal&rdquo;, non-streaming compiler would. This is comparable to LLVM IR or Cranelift IR - a simpler version of the input code that allows you to perform optimisations without having to deal with as many cases. I&rsquo;ll get into precisely how this differs from WebAssembly later. The difference between this and LLVM IR is that Lightbeam&rsquo;s IR conversion is streaming - we can convert a stream of WebAssembly to a stream of IR and the backend can convert a stream of IR to a stream of native code. In practice this means that we can generate native code with only one-opcode lookahead.</p>
-<p>In the backend we keep track of where values are stored, so that we don&rsquo;t need to move items around unless absolutely necessary. The upshot of this is that values stay in registers as much as possible and often do not need to be spilled to memory - and when they are spilled to memory they&rsquo;re spilled in order of least-recently-used. Currently we have 4 kinds of value locations: a value can be stored in memory, in a register, in a constant or as a condition code. The latter means that where many streaming compilers would emit a comparison, a conversion of the comparison&rsquo;s result to an integer, a comparison of that integer to 0, and then a jump, in Lightbeam we just emit a comparison and then a jump on that condition code, just as a non-streaming compiler would. We also get constant folding for free with this method, all without sacrificing streaming.</p>
-<p>In our case we simplify <code>if..end</code>, <code>if..else..end</code>, <code>br_if</code>, <code>br_table</code>, <code>block..end</code> and <code>loop..end</code> constructs to a single, flat form. Instead of nested blocks like WebAssembly, we have a flat list of <a href="https://en.wikipedia.org/wiki/Basic_block">basic blocks</a> which must end with <code>br</code>, <code>br_if</code> or <code>br_table</code>. Instead of having many ways to switch control flow, we only have 3<sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>. entering a <code>block</code> becomes a no-op, but <code>if</code>, <code>else</code>, <code>loop</code> and <code>end</code> need to be converted into this form. This is luckily extremely simple in practice.</p>
-<p>One very useful fact is that there&rsquo;s no way for a block to jump without also ending the block, which simplifies a lot. Unfortunately, WebAssembly does allow that, so we have some complications. Consider the following WebAssembly:</p>
-<div class="highlight"><pre class="chroma"><code class="language-lisp" data-lang="lisp"><span class="p">(</span><span class="k">block</span> <span class="p">(</span><span class="nv">result</span> <span class="nv">i32</span><span class="p">)</span>
-    <span class="nv">i32.const</span> <span class="mi">1</span>
-    <span class="nv">i32.const</span> <span class="mi">2</span>
-    <span class="nv">get_local</span> <span class="mi">0</span>
-    <span class="nv">br_if</span> <span class="mi">0</span>
-    <span class="nv">i32.add</span>
-<span class="p">)</span>
-</code></pre></div><p>So what this does is returns the <code>2</code> constant from the function if local <code>0</code> is non-zero, and otherwise returns the <code>1</code> and <code>2</code> constants added together. That is, the <code>1</code> is discarded <em>only if the branch is taken</em>. In the Lightbeam IR we explicitly state which elements are dropped for each branch target, which means that it is impossible to forget to handle this case or to handle it incorrectly - a branch where nothing is discarded and a branch where something is discarded are treated the same.</p>
-<p>We also annotate each block header with the number of calls and whether it may have backwards callers - there are optimisations you can do when a block has precisely one caller<sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup> and we can omit generating code for blocks with zero callers entirely. Because of Wasm&rsquo;s approach to control flow we can&rsquo;t always know ahead of time how many callers a block will have so as a backup we count the number of callers ourselves. For blocks that can have backwards callers (i.e. those generated from Wasm <code>loop</code> instructions, since branch instructions branch to the loop&rsquo;s header), however, that doesn&rsquo;t work, and so we explicitly mark any block that could have backwards callers. You can see that without making this information simple and explicit in the IR doing optimisations related to this would be prohibitively complex.</p>
-<p>The meat of the compiler comes in the form of the virtual stack. This is a <a href="https://en.wikipedia.org/wiki/Stack_(abstract_data_type)">LIFO queue</a> of value locations, which can be either:</p>
-<ul>
-<li>Stack: A location on the physical stack (i.e. a memory location that is an offset to <code>rsp</code>). Since <code>rsp</code> can change within a function, this is stored as an offset from what <code>rsp</code> was at the start of the function and the real offset is recalculated each time the value is accessed.</li>
-<li>Register: A value in a register. I go over some important subtleties related to this further down.</li>
-<li>Immediate: A constant value, which allows us to fold constants and do optimisations like using the immediate-operand version of instructions like <code>add</code> instead of spilling the constant to a register first.</li>
-<li>Condition code: A value that represents one of the bits in the FLAGS register. This means that a comparison operation followed by a <code>select</code> or <code>br_if</code> can be compiled to one of the <code>cc</code> forms of the associated instructions. For example, <code>i32.lt_u</code> + <code>select</code> compiles to <code>cmp</code> + <code>cmovb</code>, the <code>cmp</code> instruction sets some flags on the CPU and the <code>cmovb</code> reads the flags and sets the corresponding register to a certain value if the <code>b</code> flag is set. Since there&rsquo;s only one FLAGS register and many things overwrite it, we spill this kind of value to a register if anything gets pushed onto the stack on top of it. In the future we&rsquo;d like to be able to only spill a condition code if we actually do an operation that overwrites it.</li>
-</ul>
-<p>An important thing about our &ldquo;register&rdquo; type is that registers are refcounted. To see why that&rsquo;s important, we have to talk about locals.</p>
-<p>In WebAssembly, there are two kinds of place that a value can be: on the (virtual) stack or in a local. You can move a value from the stack to a local with <code>set_local</code> and from a local to the stack with <code>get_local</code>. There&rsquo;s also <code>tee_local</code>, which is equivalent to <code>set_local</code> followed by <code>get_local</code><sup id="fnref:3"><a href="#fn:3" class="footnote-ref" role="doc-noteref">3</a></sup>. Anyway, for our purposes the important thing is that <code>get_local</code> cause a value to be duplicated. This also applies to <code>tee_local</code> but we&rsquo;ll ignore that for now for simplicity&rsquo;s sake. If you have some system for tracking register uses, for example, where a register can be reused when it&rsquo;s no longer to be possible to access the value that was previously in it, you need to refcount registers, so that you can, for example, do a <code>get_local</code> followed by overwriting the value in that local without causing the old value on the stack to magically change or otherwise become invalid. This allows us to do some other optimisations though.</p>
-<p>For example, on x86 you don&rsquo;t really have a <code>+</code> operator<sup id="fnref:4"><a href="#fn:4" class="footnote-ref" role="doc-noteref">4</a></sup>, you only have <code>+=</code>. Normally you&rsquo;d need to allocate a new register, copy the LHS of the operator into it and add the RHS in-place, but if the refcount on that register is precisely 1 you can operate on it in-place. Another use of refcounting in a streaming compiler is that although in straight-line code you can have aliasing values, when you start a loop (and in some other circumstances) you have to have all your locals and stack elements in unique places. To illustrate why this is, let&rsquo;s use an example. Here&rsquo;s a simple loop in WebAssembly:</p>
-<div class="highlight"><pre class="chroma"><code class="language-lisp" data-lang="lisp"><span class="p">(</span><span class="nv">func</span> <span class="nv">$bad_factorial</span> <span class="p">(</span><span class="nv">param</span> <span class="nv">$param</span> <span class="nv">i32</span><span class="p">)</span>
-  <span class="p">(</span><span class="nv">local</span> <span class="nv">$counter</span> <span class="nv">i32</span><span class="p">)</span>
-  <span class="p">(</span><span class="nv">local</span> <span class="nv">$output</span> <span class="nv">i32</span><span class="p">)</span>
-  <span class="p">(</span><span class="nv">set_local</span> <span class="nv">$counter</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$param</span><span class="p">))</span>
-  <span class="p">(</span><span class="nv">set_local</span> <span class="nv">$output</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$counter</span><span class="p">))</span>
-  <span class="p">(</span><span class="nb">loop</span>
-    <span class="p">(</span><span class="nv">set_local</span> <span class="nv">$counter</span>
-      <span class="p">(</span><span class="nv">i32.sub</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$counter</span><span class="p">)</span>
-               <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">1</span><span class="p">)))</span>
-    <span class="p">(</span><span class="nv">set_local</span> <span class="nv">$output</span>
-      <span class="p">(</span><span class="nv">i32.mul</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$output</span><span class="p">)</span>
-               <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$counter</span><span class="p">)))</span>
-    <span class="p">(</span><span class="nv">br_if</span> <span class="mi">0</span> <span class="p">(</span><span class="nv">i32.ne</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$counter</span><span class="p">)</span> <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">0</span><span class="p">)))</span>
-  <span class="p">)</span>
-  <span class="p">(</span><span class="nb">return</span> <span class="p">(</span><span class="nv">get_local</span> <span class="nv">$output</span><span class="p">))</span>
-<span class="p">)</span>
-</code></pre></div><p>So in this function, when the loop starts both locals point to the same place. This is bad, since after the first iteration they will have non-aliasing locations and if we generate code that looks in the same place for both variables we&rsquo;ll end up returning the wrong result. We could choose arbitrary but static and non-aliasing locations for values used by blocks (in the same way that functions have a specific calling convention called SystemV) but we want to avoid moving values around if possible. So, the first time a block is called we try to set the block&rsquo;s calling convention to whatever the locations of values happen to be at the first call. When we set the calling convention for the first time, we allocate the minimum number of new locations that will remove any aliasing values. This is why it&rsquo;s important that we know if a block has precisely one caller: if it only has one caller then we can always keep values where they are. If there are aliasing values then that&rsquo;s fine, since we know that it&rsquo;s impossible for this block be called with non-aliasing values<sup id="fnref:5"><a href="#fn:5" class="footnote-ref" role="doc-noteref">5</a></sup>.</p>
-<p>For a deeper explanation of Lightbeam&rsquo;s IR check out the <a href="http://troubles.md/wasm-is-not-a-stack-machine/">article series that lead me to develop it</a>.</p>
-<h2 id="what-does-this-mean-for-me">What does this mean for me?</h2>
-<p>If you&rsquo;re just someone who interacts with WebAssembly as a consumer - i.e. you write code that compiles to WebAssembly and the Wasm runtime is just a black box - you might be asking what this means for you. Well, this means that Wasmtime can have vastly better startup performance, and will almost certainly have much more consistent startup performance. Other than that, it&rsquo;s probably something that will be mostly transparent for you. It&rsquo;s the same as V8&rsquo;s LiftOff or FireFox&rsquo;s baseline compiler, but for Wasmtime. However, I hope this article gives an amount of insight into how this unconventional form of compiler can work.</p>
-<section class="footnotes" role="doc-endnotes">
-<hr>
-<ol>
-<li id="fn:1" role="doc-endnote">
-<p>It would technically be possible to collapse <code>br_table</code> and <code>br_if</code> into a single construct but there are optimisations that you can do for the latter that aren&rsquo;t possible with the former, so we&rsquo;d just end up converting it back later on. I might actually do this later since it means that we can focus optimisation on just a single place (so if we get a two-target <code>br_table</code> as input we generate code as good as for a <code>br_if</code>), but for now they&rsquo;re separate. We could even collapse <code>br</code> into <code>br_table</code> with one element, giving us only one possibility to work with. <a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:2" role="doc-endnote">
-<p>In a &ldquo;proper&rdquo; optimising compiler that doesn&rsquo;t need to support streaming compilation, you can do optimisations on blocks with more than one caller but a streaming compiler can only do these optimisations for blocks with precisely one caller. I won&rsquo;t go into precisely why this is now, I&rsquo;ll leave that as an exercise for the reader, but I might revisit it in a future article. <a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:3" role="doc-endnote">
-<p>Why they didn&rsquo;t have it return the <em>old</em> value of the local is beyond me, since that&rsquo;s a lot harder to emulate (requiring you to generate an extra local). The current behaviour is trivially emulateable. I presume it&rsquo;s related to Wasm&rsquo;s roots as a binary representation of asm.js and the fact that JavaScript allows <code>a = b = c = d</code>, but that&rsquo;s just speculation. <a href="#fnref:3" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:4" role="doc-endnote">
-<p>Technically <code>+</code> is a bad example since you can emulate 3-argument <code>add</code> with <code>lea</code> but bear with me here. <a href="#fnref:4" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:5" role="doc-endnote">
-<p>We have the same problem with values that are constants as we have for aliasing values - if we return a constant for a specific variable but then this block is called with a different value for that constant then we&rsquo;ll end up with the wrong result. <a href="#fnref:5" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-</ol>
-</section>
+    footer img {
+        filter: invert();
+    }
 
-</div>
+    .code-dark {
+        display: block;
+    }
 
-<footer>
-	<p>© 2017-2018, all rights reserved.</a>
-</footer>
-</body>
-</html>
+    .code-light {
+        display: none;
+    }
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--font-color);
+}
+
+body,
+li p {
+    font-family: var(--body-font), sans-serif;
+    letter-spacing: 0.15pt;
+    word-spacing: 0.08pt;
+    line-height: 1.8;
+}
+
+h2,
+h3 {
+    --line-width: 9pt;
+    --inset: var(--title-inset);
+
+    display: flex;
+    flex-direction: row;
+    background-color: var(--code-background-color);
+    border-left: var(--line-width) solid var(--accent-color);
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+    padding-left: calc(var(--inset) - var(--line-width));
+    padding-right: 0.6rem;
+    padding-bottom: 0.2rem;
+    margin-top: 2.1rem;
+    margin-bottom: 0.4rem;
+}
+
+h2 span,
+h3 span {
+    display: none;
+}
+
+h2 .section-title,
+h3 .section-title {
+    display: inline-block;
+}
+
+.section-link-postfix {
+    display: flex;
+
+    flex-direction: column;
+    justify-content: space-around;
+
+    font-family: var(--body-font);
+    font-size: 90%;
+    padding-left: 12pt;
+    margin-left: auto;
+}
+
+.section-link-postfix a {
+    opacity: 0.7;
+    color: var(--header-font-color);
+}
+
+h2 a span,
+h3 a span {
+    font-size: 18px;
+    color: var(--code-background-color);
+}
+
+h2 a span {
+    padding-top: 0.5rem;
+}
+
+h3 a span {
+    padding-top: 0.1rem;
+}
+
+h2 .section-link a:hover,
+h3 .section-link a:hover {
+    background-color: var(--accent-color);
+}
+
+h2 .section-link a:hover span,
+h3 .section-link a:hover span {
+    display: block;
+}
+
+a .section-link {
+    font-size: calc(100% * var(--font-perc));
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--secondary-header-font), serif;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+}
+
+a code {
+    color: var(--accent-color);
+}
+
+h1 {
+    font-family: var(--main-header-font), serif;
+    font-weight: normal;
+    letter-spacing: 1pt;
+    display: block;
+    font-size: 250%;
+    line-height: 1.2;
+    padding-top: 0.02em;
+    margin-top: 1em;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+h2 {
+    font-size: 170%;
+}
+
+h3 {
+    font-size: 120%;
+}
+
+.post-link {
+    margin-bottom: 1em;
+}
+
+.post-link a {
+    font-family: var(--secondary-header-font);
+    color: var(--font-color);
+}
+
+header .blog-name a {
+    font-family: "Nova Square";
+    font-size: 130%;
+    letter-spacing: 3pt;
+    color: var(--font-color);
+    border-right: 3px solid var(--accent-color);
+}
+
+@keyframes blink-cursor {
+    50% {
+        border-right: unset;
+    }
+}
+
+header .blog-name a:hover {
+    animation: blink-cursor 1s linear infinite;
+}
+
+header,
+header a {
+    color: var(--header-font-color);
+    text-decoration: none;
+}
+
+/* reset */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    height: 100%;
+}
+
+li:target {
+    background-color: var(--code-background-color);
+}
+
+body {
+    padding: 0rem 0em 0rem 0em;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "kern=1";
+    -moz-font-feature-settings: "kern" 1;
+    -webkit-font-feature-settings: "kern" 1;
+    -o-font-feature-settings: "kern" 1;
+    -ms-font-feature-settings: "kern" 1;
+    font-feature-settings: "kern" 1;
+
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "liga=1";
+    -moz-font-feature-settings: "liga" 1;
+    -webkit-font-feature-settings: "liga" 1;
+    -o-font-feature-settings: "liga" 1;
+    -ms-font-feature-settings: "liga" 1;
+    font-feature-settings: "liga" 1;
+}
+
+.spon {
+    width: 100%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 14px;
+    background-color: rgb(243, 243, 165);
+    border-left: 3px solid var(--font-color);
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    padding-left: 12px;
+    padding-top: 5px;
+}
+
+.attribution {
+    display: block;
+    font-size: 18px;
+    font-family: "Montserrat", sans-serif;
+    width: 100%;
+    line-height: 1.8;
+    margin-top: 5px;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+header {
+    --inset: var(--title-inset);
+
+    font-family: "Cascadia Mono";
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.2;
+    justify-content: space-between;
+    /*background-color: var(--code-background-color);*/
+    display: flex;
+    letter-spacing: 0.7pt;
+    align-items: center;
+    padding: 0.5rem var(--inset);
+    border-bottom: 0.1em solid var(--header-font-color);
+    margin-bottom: 1.5rem;
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+}
+
+header a:hover {
+    color: var(--header-font-color);
+}
+
+.blog-name {
+    font-weight: 900;
+    justify-self: start;
+}
+
+.tagline {
+    justify-self: end;
+    font-weight: 100;
+}
+
+.blog-name,
+.tagline {
+    margin-bottom: 0px;
+    text-decoration: none;
+}
+
+footer {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 180px;
+}
+
+footer img {
+    width: 30px;
+    height: 30px;
+}
+
+.footnotes li p {
+    display: inline;
+}
+
+.ft-return-link {
+    display: inline;
+    margin-left: 0.5em;
+}
+
+.title {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.title aside {
+    width: 100%;
+    text-align: right;
+}
+
+.post-link:first-of-type {
+    margin-top: 1rem;
+}
+
+.post-link {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.post-link aside {
+    min-width: 152px;
+}
+
+.post-link a {
+    padding-left: var(--default-inset);
+    margin-left: calc(-1 * var(--default-inset));
+    line-height: 1.6;
+    padding-right: 1.5rem;
+    flex-grow: 1;
+}
+
+aside {
+    font-family: "Lato", sans-serif;
+    font-size: 0.84rem;
+    align-self: center;
+    line-height: 1.4;
+    color: var(--date-color);
+    text-align: right;
+    margin-right: 1em;
+    text-wrap-mode: nowrap;
+}
+
+aside em {
+    font-size: 0.7rem;
+}
+
+p {
+    margin-bottom: 1em;
+}
+
+ul {
+    list-style: custom;
+}
+
+ul li::marker {
+    color: var(--accent-color);
+}
+
+ol li::marker {
+    color: var(--header-font-color);
+}
+
+li li::marker {
+    color: var(--date-color);
+}
+
+ul {
+    margin-bottom: 1em;
+}
+
+ul ul,
+ol ol {
+    margin-bottom: 0;
+    padding-left: 1em;
+}
+
+li p {
+    margin-bottom: 0;
+}
+
+li {
+    padding-left: 0.3em;
+    margin-left: 1em;
+    margin-bottom: 0.5em;
+}
+
+table {
+    margin-bottom: 1.5em;
+    border-collapse: collapse;
+    width: 95%;
+}
+
+table tr + tr {
+    border-top: 1px solid #ccc;
+}
+table td + td {
+    border-left: 1px solid #ccc;
+}
+
+table td {
+    padding: 0.4em;
+    text-align: center;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+table th {
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 95%;
+    padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+    line-height: 1.05;
+}
+
+img {
+    width: 100%;
+}
+
+a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+div.nav a:active div {
+    background: #cacaca;
+}
+
+a:active {
+    color: var(--header-font-color);
+}
+
+a:hover {
+    background: var(--code-background-color);
+}
+
+.post-link a:hover {
+    color: var(--date-color);
+}
+
+pre {
+    margin-left: var(--expanded-inset);
+    margin-right: var(--expanded-inset);
+    padding-left: 1.4em;
+    padding-top: 1em;
+    padding-bottom: 1em;
+    margin-bottom: 1em;
+    background-color: var(--code-background-color);
+    overflow: auto;
+    line-height: 1.5;
+    letter-spacing: -0.2pt;
+    border-left: 3.5px solid #bbb;
+    font-size: 85%;
+}
+
+code {
+    font-family: var(--code-font), monospace;
+    color: var(--pre-font-color);
+    display: inline-block;
+    max-width: 100%;
+    font-variant-ligatures: none;
+    text-rendering: auto;
+    -moz-font-feature-settings: "liga=0";
+    -moz-font-feature-settings: "liga" 0;
+    -webkit-font-feature-settings: "liga" 0;
+    -o-font-feature-settings: "liga" 0;
+    -ms-font-feature-settings: "liga" 0;
+    font-feature-settings: "liga" 0;
+}
+
+h1 > code,
+h2 > code,
+h3 > code,
+h4 > code,
+p > code {
+    display: inline-block;
+    text-transform: none;
+    padding-left: 0.1em;
+    padding-right: 0.1em;
+    font-size: 103%;
+    color: var(--pre-font-color);
+}
+
+figcaption {
+    font-weight: 400;
+    font-style: italic;
+    font-size: 0.7em/1.52;
+    line-height: 1.3;
+    color: #666665;
+    outline: 0;
+    z-index: 300;
+    text-align: center;
+}
+
+blockquote {
+    border-left: 3.5px solid var(--accent-color);
+    margin: 10px var(--expanded-inset);
+    padding: var(--default-inset) 20px;
+}
+
+blockquote p {
+    display: inline;
+}
+
+.content {
+    margin-bottom: 30px;
+}
+
+@media all {
+    html {
+        font-size: 18px;
+    }
+    .main {
+        margin-left: 7.5rem;
+        margin-right: 7.5rem;
+    }
+}
+@media all and (max-width: 1200px) {
+    pre {
+        margin-left: var(--default-inset);
+        margin-right: var(--default-inset);
+    }
+
+    blockquote {
+        margin: 0.7em var(--default-inset);
+    }
+}
+@media all and (max-width: 840px) {
+    h2,
+    h3 {
+        padding-left: var(--default-inset);
+        padding-right: var(--default-inset);
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    .post-link {
+        flex-direction: column-reverse;
+        justify-content: unset;
+    }
+
+    .post-link aside {
+        align-self: start;
+        text-align: left;
+    }
+
+    .title h1 {
+        text-align: center;
+    }
+
+    .main {
+        margin-left: 4rem;
+        margin-right: 4rem;
+    }
+}
+@media all and (max-width: 760px) {
+    .title h1 {
+        font-size: 24pt;
+    }
+
+    .main {
+        margin-left: 2.5rem;
+        margin-right: 2.5rem;
+    }
+}
+@media all and (max-width: 580px) {
+    .title h1 {
+        font-size: 20pt;
+    }
+
+    .tagline {
+        display: block;
+        font-size: 12px;
+    }
+
+    h2,
+    h3 {
+        --line-width: 4pt;
+        --inset: var(--default-inset);
+
+        margin-top: 0.4em;
+        padding-left: calc(var(--inset) - var(--line-width));
+    }
+
+    h2 .section-link,
+    h3 .section-link {
+        display: none;
+    }
+
+    h2 {
+        padding-top: 2pt;
+        font-size: 20pt;
+        padding-bottom: 2pt;
+    }
+
+    h3 {
+        font-size: 17pt;
+    }
+
+    aside.date-short {
+        display: none;
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    body,
+    li p {
+        line-height: 1.5;
+    }
+
+    header .separator {
+        visibility: collapse;
+    }
+
+    .main {
+        margin: 0 var(--default-inset);
+    }
+}
+</style></head><body><div class="main"><header><span class="blog-name"><a href="../index.html">troubles.md</a></span> <span class="tagline">Writing words and reading dwords</span></header><span></span><div class="content"><div class="title"><h1>Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler</h1><aside>04 May, 2019</aside></div><div class="post"><p><a href="https://github.com/CraneStation/lightbeam">Lightbeam</a> is a new streaming compiler for WebAssembly, designed to produce the best possible assembly while still being fast enough to produce assembly faster than the WebAssembly is received over the wire.</p><p>WebAssembly was designed for streaming compilation, and even from its first public release there was a streaming implementation - <a href="https://github.com/CraneStation/lightbeam">Firefox has had its own optimising streaming compiler for a long time</a> and V8 has LiftOff.</p><p>Lightbeam is similar in concept, but has a different internal mechanism which leads to surprisingly high-quality code considering the constraints, and I’ll explain how it works in this article.</p><h2 id="introducing-lightbeam-an-optimising-streaming-webassembly-compiler-lightbeam"><span class="section-title">Lightbeam</span> <span class="section-link-postfix"><a href="#introducing-lightbeam-an-optimising-streaming-webassembly-compiler-lightbeam">§</a></span></h2><p>Lightbeam is intended for use as the initial compiler in <a href="https://github.com/bytecodealliance/wasmtime">Wasmtime</a> and as the main compilation engine for Substrate‘s smart contract subsystem.</p><p>In relation to the latter, you might have some questions: Why do we need a compiler for our smart contracts? What even are smart contracts? We really want to put a compiler in a blockchain client? For answers to these questions and more you can check out <a href="../why-wasm/index.html">my article about WebAssembly on the blockchain</a>, but it’s not particularly important for the purposes of this article.</p><p>What is important is how WebAssembly works and how we can work around its limitations to produce high-quality code in a streaming compiler.</p><h2 id="introducing-lightbeam-an-optimising-streaming-webassembly-compiler-streaming-compilation"><span class="section-title">Streaming compilation</span> <span class="section-link-postfix"><a href="#introducing-lightbeam-an-optimising-streaming-webassembly-compiler-streaming-compilation">§</a></span></h2><p>So I’m not going to go too deep into this since Lin Clark has <a href="https://hacks.mozilla.org/2018/01/making-webassembly-even-faster-firefoxs-new-streaming-and-tiering-compiler/">already covered this much more thoroughly</a> than I can, but here’s the pitch. If you want to have fast startup times for a program, you have a few options, each with their own pros and cons:</p><ul><li><p>Distribute the program as machine code</p><ul><li>Pros: Very fast, predictable performance</li><li>Cons: Massively insecure, can’t use <a href="https://en.wikipedia.org/wiki/SSE4">microarchitecture-specific opcodes</a> without extra complexity and runtime checks, must distribute separate versions of the program for each target platform</li></ul></li><li><p>Distribute bytecode and use an interpreter</p><ul><li>Pros: Easy to implement, easy to debug, easy to add extra functionality, easy to ensure correctness, easy to write a convenient API, 100% thread- and memory-safe by default, portable to any platform that the host language is</li><li>Cons: Slow (really, really slow)</li></ul></li><li><p>Distribute bytecode and use a JIT</p><ul><li>Pros: Very fast startup and execution, can lazily compile functions (so unused functions are never compiled), can take advantage of host microarchitecture, can do <a href="https://www.slideshare.net/ZeroTurnaround/vladimir-ivanovjvmjitcompilationoverview-24613146">incredibly powerful optimisation techniques</a> that are impossible with ahead-of-time compilation</li><li>Cons: Easily the most complex option, no thread- or memory-safety by default, good average-case startup but without extremely careful implementation can have very bad worst-case startup time, must implement a different backend for each target architecture</li></ul></li><li><p>Distribute bytecode and use streaming compilation</p><ul><li>Pros: Can give very good performance with good bytecode design, relatively easy to ensure worst-case startup time is low, can take advantage of host microarchitecture</li><li>Cons: Must implement a different backend for each target architecture, no thread- or memory-safety by default, need to design bytecode around constraints of streaming compilation</li></ul></li></ul><p>The main reason we decided to use a streaming compiler at Parity is that the strict bounds on compilation time are necessary in the context of the blockchain, currently we use <a href="https://github.com/paritytech/wasmi">our own in-house WebAssembly interpreter</a>.</p><p>Any one of these can be combined with a slower but more-powerful compiler that works in the background as the more immediate method of execution is running the program, with execution switching to the output of the heavyweight compiler when it’s ready.</p><h2 id="introducing-lightbeam-an-optimising-streaming-webassembly-compiler-webassembly-primer"><span class="section-title">WebAssembly primer</span> <span class="section-link-postfix"><a href="#introducing-lightbeam-an-optimising-streaming-webassembly-compiler-webassembly-primer">§</a></span></h2><p>So to explain what Lightbeam does internally, I need to explain a few things about WebAssembly. WebAssembly is a weird middle-ground between a high-level language and a more traditional bytecode. It is a bytecode in that it’s a <a href="https://en.wikipedia.org/wiki/Stack_machine">stack machine</a>, canonically represented as a series of opcodes instead of using a text-based format, but it has many high-level features that are rarely seen in bytecodes, like having hierarchical blocks using <code>block...end</code> that you can break out of, a separate block type for blocks that you can jump to the end of and blocks that you can jump to the start of, and an <code>if..else..end</code> construct instead of a using more traditional “test-and-jump” instruction (it also has a test-and-jump instruction, but you currently <a href="../why-do-we-need-the-relooper-algorithm-again/index.html">can’t use it to emulate if statements</a>). Plus, it has “locals”, a concept similar to variables in most high-level languages. These locals are <a href="../wasm-is-not-a-stack-machine/index.html">actually more trouble than they’re worth</a>, however, they’re more an artifact of WebAssembly’s history than a useful feature.</p><p>So although WebAssembly is designed to be easily compiled and easily compiled with a streaming compiler, it’s actually pretty non-trivial to generate optimal code from WebAssembly directly. That’s why Lightbeam doesn’t.</p><h2 id="introducing-lightbeam-an-optimising-streaming-webassembly-compiler-gotta-go-fast"><span class="section-title">Gotta go fast</span> <span class="section-link-postfix"><a href="#introducing-lightbeam-an-optimising-streaming-webassembly-compiler-gotta-go-fast">§</a></span></h2><p>So, how does Lightbeam get such good code? Well, there’s lots of small optimisations that make it possible, but we start by converting to an <a href="https://en.wikipedia.org/wiki/Static_single_assignment_form">SSA</a>, <a href="https://en.wikipedia.org/wiki/Control-flow_graph">CFG</a> intermediate representation like a “normal”, non-streaming compiler would. This is comparable to LLVM IR or Cranelift IR - a simpler version of the input code that allows you to perform optimisations without having to deal with as many cases. I’ll get into precisely how this differs from WebAssembly later. The difference between this and LLVM IR is that Lightbeam’s IR conversion is streaming - we can convert a stream of WebAssembly to a stream of IR and the backend can convert a stream of IR to a stream of native code. In practice this means that we can generate native code with only one-opcode lookahead.</p><p>In the backend we keep track of where values are stored, so that we don’t need to move items around unless absolutely necessary. The upshot of this is that values stay in registers as much as possible and often do not need to be spilled to memory - and when they are spilled to memory they’re spilled in order of least-recently-used. Currently we have 4 kinds of value locations: a value can be stored in memory, in a register, in a constant or as a condition code. The latter means that where many streaming compilers would emit a comparison, a conversion of the comparison’s result to an integer, a comparison of that integer to 0, and then a jump, in Lightbeam we just emit a comparison and then a jump on that condition code, just as a non-streaming compiler would. We also get constant folding for free with this method, all without sacrificing streaming.</p><p>In our case we simplify <code>if..end</code>, <code>if..else..end</code>, <code>br_if</code>, <code>br_table</code>, <code>block..end</code> and <code>loop..end</code> constructs to a single, flat form. Instead of nested blocks like WebAssembly, we have a flat list of basic blocks which must end with <code>br</code>, <code>br_if</code> or <code>br_table</code>. Instead of having many ways to switch control flow, we only have 3 <a id="ft-ref-0-1" href="#ft-note-0-1"><sup>1</sup></a> . Entering a <code>block</code> becomes a no-op, but <code>if</code>, <code>else</code>, <code>loop</code> and <code>end</code> need to be converted into this form. This is luckily extremely simple in practice.</p><p>One very useful fact is that there’s no way for a block to jump without also ending the block, which simplifies a lot. Unfortunately, WebAssembly does allow that, so we have some complications. Consider the following WebAssembly:</p><div class="code-dark"><pre><code data-lang="lisp">(<span style="color: #ffbd5e">block</span> (<span style="color: #5ea1ff">result</span> i32)
+    i32.const 1
+    i32.const 2
+    get_local 0
+    br_if 0
+    i32.add
+)</code></pre></div><div class="code-light"><pre><code data-lang="lisp">(<span style="color: #d17c00">block</span> (<span style="color: #0057d1">result</span> i32)
+    i32.const 1
+    i32.const 2
+    get_local 0
+    br_if 0
+    i32.add
+)</code></pre></div><p>So what this does is returns the <code>2</code> constant from the function if local <code>0</code> is non-zero, and otherwise returns the <code>1</code> and <code>2</code> constants added together. That is, the <code>1</code> is discarded <em>only if the branch is taken</em>. In the Lightbeam IR we explicitly state which elements are dropped for each branch target, which means that it is impossible to forget to handle this case or to handle it incorrectly - a branch where nothing is discarded and a branch where something is discarded are treated the same.</p><p>We also annotate each block header with the number of calls and whether it may have backwards callers - there are optimisations you can do when a block has precisely one caller <a id="ft-ref-0-2" href="#ft-note-0-2"><sup>2</sup></a> and we can omit generating code for blocks with zero callers entirely. Because of Wasm’s approach to control flow we can’t always know ahead of time how many callers a block will have so as a backup we count the number of callers ourselves. For blocks that can have backwards callers (i.e. those generated from Wasm loop instructions, since branch instructions branch to the loop’s header), however, that doesn’t work, and so we explicitly mark any block that could have backwards callers. You can see that without making this information simple and explicit in the IR doing optimisations related to this would be prohibitively complex.</p><p>The meat of the compiler comes in the form of the virtual stack. This is a <a href="https://en.wikipedia.org/wiki/Stack_(abstract_data_type)">LIFO queue</a> of value locations, which can be either:</p><ul><li>Stack: A location on the physical stack (i.e. a memory location that is an offset to <code>rsp</code>). Since <code>rsp</code> can change within a function, this is stored as an offset from what <code>rsp</code> was at the start of the function and the real offset is recalculated each time the value is accessed.</li><li>Register: A value in a register. I go over some important subtleties related to this further down.</li><li>Immediate: A constant value, which allows us to fold constants and do optimisations like using the immediate-operand version of instructions like add instead of spilling the constant to a register first.</li><li>Condition code: A value that represents one of the bits in the <code>FLAGS</code> register. This means that a comparison operation followed by a <code>select</code> or <code>br_if</code> can be compiled to one of the cc forms of the associated instructions. For example, <code>i32.lt_u</code> + <code>select</code> compiles to <code>cmp</code> + <code>cmovb</code>, the <code>cmp</code> instruction sets some flags on the CPU and the <code>cmovb</code> reads the flags and sets the corresponding register to a certain value if the <code>b</code> flag is set. Since there’s only one <code>FLAGS</code> register and many things overwrite it, we spill this kind of value to a register if anything gets pushed onto the stack on top of it. In the future we’d like to be able to only spill a condition code if we actually do an operation that overwrites it.</li></ul><p>An important thing about our “register” type is that registers are refcounted. To see why that’s important, we have to talk about locals.</p><p>In WebAssembly, there are two kinds of place that a value can be: on the (virtual) stack or in a local. You can move a value from the stack to a local with <code>set_local</code> and from a local to the stack with <code>get_local</code>. There’s also <code>tee_local</code>, which is equivalent to <code>set_local</code> followed by <code>get_local</code> <a id="ft-ref-0-3" href="#ft-note-0-3"><sup>3</sup></a> . Anyway, for our purposes the important thing is that <code>get_local</code> cause a value to be duplicated. This also applies to <code>tee_local</code> but we’ll ignore that for now for simplicity’s sake. If you have some system for tracking register uses, for example, where a register can be reused when it’s no longer to be possible to access the value that was previously in it, you need to refcount registers, so that you can, for example, do a <code>get_local</code> followed by overwriting the value in that local without causing the old value on the stack to magically change or otherwise become invalid. This allows us to do some other optimisations though.</p><p>For example, on x86 you don’t really have a <code>+</code> operator4, you only have <code>+=</code>. Normally you’d need to allocate a new register, copy the LHS of the operator into it and add the RHS in-place, but if the refcount on that register is precisely 1 you can operate on it in-place. Another use of refcounting in a streaming compiler is that although in straight-line code you can have aliasing values, when you start a loop (and in some other circumstances) you have to have all your locals and stack elements in unique places. To illustrate why this is, let’s use an example. Here’s a simple loop in WebAssembly:</p><div class="code-dark"><pre><code data-lang="lisp">(<span style="color: #5ea1ff">func</span> $bad_factorial (<span style="color: #5ea1ff">param</span> $param i32)
+  (<span style="color: #5ea1ff">local</span> $counter i32)
+  (<span style="color: #5ea1ff">local</span> $output i32)
+  (<span style="color: #5ea1ff">set_local</span> $counter (<span style="color: #5ea1ff">get_local</span> $param))
+  (<span style="color: #5ea1ff">set_local</span> $output (<span style="color: #5ea1ff">get_local</span> $counter))
+  (<span style="color: #ffbd5e">loop</span>
+    (<span style="color: #5ea1ff">set_local</span> $counter
+      (<span style="color: #5ea1ff">i32.sub</span> (<span style="color: #5ea1ff">get_local</span> $counter)
+               (<span style="color: #5ea1ff">i32.const</span> 1)))
+    (<span style="color: #5ea1ff">set_local</span> $output
+      (<span style="color: #5ea1ff">i32.mul</span> (<span style="color: #5ea1ff">get_local</span> $output)
+               (<span style="color: #5ea1ff">get_local</span> $counter)))
+    (<span style="color: #5ea1ff">br_if</span> 0 (<span style="color: #5ea1ff">i32.ne</span> (<span style="color: #5ea1ff">get_local</span> $counter) (<span style="color: #5ea1ff">i32.const</span> 0)))
+  )
+  (<span style="color: #ffbd5e">return</span> (<span style="color: #5ea1ff">get_local</span> $output))
+)</code></pre></div><div class="code-light"><pre><code data-lang="lisp">(<span style="color: #0057d1">func</span> $bad_factorial (<span style="color: #0057d1">param</span> $param i32)
+  (<span style="color: #0057d1">local</span> $counter i32)
+  (<span style="color: #0057d1">local</span> $output i32)
+  (<span style="color: #0057d1">set_local</span> $counter (<span style="color: #0057d1">get_local</span> $param))
+  (<span style="color: #0057d1">set_local</span> $output (<span style="color: #0057d1">get_local</span> $counter))
+  (<span style="color: #d17c00">loop</span>
+    (<span style="color: #0057d1">set_local</span> $counter
+      (<span style="color: #0057d1">i32.sub</span> (<span style="color: #0057d1">get_local</span> $counter)
+               (<span style="color: #0057d1">i32.const</span> 1)))
+    (<span style="color: #0057d1">set_local</span> $output
+      (<span style="color: #0057d1">i32.mul</span> (<span style="color: #0057d1">get_local</span> $output)
+               (<span style="color: #0057d1">get_local</span> $counter)))
+    (<span style="color: #0057d1">br_if</span> 0 (<span style="color: #0057d1">i32.ne</span> (<span style="color: #0057d1">get_local</span> $counter) (<span style="color: #0057d1">i32.const</span> 0)))
+  )
+  (<span style="color: #d17c00">return</span> (<span style="color: #0057d1">get_local</span> $output))
+)</code></pre></div><p>So in this function, when the loop starts both locals point to the same place. This is bad, since after the first iteration they will have non-aliasing locations and if we generate code that looks in the same place for both variables we’ll end up returning the wrong result. We could choose arbitrary but static and non-aliasing locations for values used by blocks (in the same way that functions have a specific calling convention called SystemV) but we want to avoid moving values around if possible. So, the first time a block is called we try to set the block’s calling convention to whatever the locations of values happen to be at the first call. When we set the calling convention for the first time, we allocate the minimum number of new locations that will remove any aliasing values. This is why it’s important that we know if a block has precisely one caller: if it only has one caller then we can always keep values where they are. If there are aliasing values then that’s fine, since we know that it’s impossible for this block be called with non-aliasing values <a id="ft-ref-0-4" href="#ft-note-0-4"><sup>4</sup></a> .</p><p>For a deeper explanation of Lightbeam’s IR check out <a href="../wasm-is-not-a-stack-machine/index.html">the article series that lead me to develop it</a>.</p><h2 id="introducing-lightbeam-an-optimising-streaming-webassembly-compiler-what-does-this-mean-for-me"><span class="section-title">What does this mean for me?</span> <span class="section-link-postfix"><a href="#introducing-lightbeam-an-optimising-streaming-webassembly-compiler-what-does-this-mean-for-me">§</a></span></h2><p>If you’re just someone who interacts with WebAssembly as a consumer - i.e. you write code that compiles to WebAssembly and the Wasm runtime is just a black box - you might be asking what this means for you. Well, this means that Wasmtime can have vastly better startup performance, and will almost certainly have much more consistent startup performance. Other than that, it’s probably something that will be mostly transparent for you. It’s the same as V8’s LiftOff or FireFox’s baseline compiler, but for Wasmtime. However, I hope this article gives an amount of insight into how this unconventional form of compiler can work.</p><section class="footnotes" role="doc-endnotes"><hr><ol><li id="ft-note-0-1">It would technically be possible to collapse <code>br_table</code> and <code>br_if</code> into a single construct but there are optimisations that you can do for the latter that aren’t possible with the former, so we’d just end up converting it back later on. I might actually do this later since it means that we can focus optimisation on just a single place (so if we get a two-target <code>br_table</code> as input we generate code as good as for a <code>br_if</code>), but for now they’re separate. We could even collapse <code>br</code> into <code>br_table</code> with one element, giving us only one possibility to work with.<div class="ft-return-link"><a href="#ft-ref-0-1">↩︎</a></div></li><li id="ft-note-0-2">In a “proper” optimising compiler that doesn’t need to support streaming compilation, you can do optimisations on blocks with more than one caller but a streaming compiler can only do these optimisations for blocks with precisely one caller. I won’t go into precisely why this is now, I’ll leave that as an exercise for the reader, but I might revisit it in a future article.<div class="ft-return-link"><a href="#ft-ref-0-2">↩︎</a></div></li><li id="ft-note-0-3">Why they didn’t have it return the <em>old</em> value of the local is beyond me, since that’s a lot harder to emulate (requiring you to generate an extra local). The current behaviour is trivially emulateable. I presume it’s related to Wasm’s roots as a binary representation of asm.js and the fact that JavaScript allows <code>a = b = c = d</code>, but that’s just speculation.<div class="ft-return-link"><a href="#ft-ref-0-3">↩︎</a></div></li><li id="ft-note-0-4">We have the same problem with values that are constants as we have for aliasing values - if we return a constant for a specific variable but then this block is called with a different value for that constant then we’ll end up with the wrong result.<div class="ft-return-link"><a href="#ft-ref-0-4">↩︎</a></div></li></ol></section></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>

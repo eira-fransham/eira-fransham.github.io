@@ -1,175 +1,657 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta name="generator" content="Hugo 0.66.0" />
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>troubles.md</title>
-    
-    <meta name="description" content="">
-    
-    <meta itemprop="name" content="troubles.md">
-    
-    
-    <meta name="og:title" content="troubles.md">
-    
-        <meta name="image" content="http://troubles.md/floppies.png">
-        <meta name="og:image" content="http://troubles.md/floppies.png">
-       <meta name="og:url" content="http://troubles.md/">
-    <meta name="og:site_name" content="troubles.md">
-    <meta name="og:type" content="article">
-    
-    <meta name="article:tag" content="">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/style.css">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/syntax.css">
-    <script async>
-        window.onload = function() {
-            var possibilities = [
-                 "A high-level view of low-level code",  "Writing words and reading DWORDS", 
-            ];
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="og:title" content="troubles.md"><meta itemprop="name" content="troubles.md"><meta name="image" content="floppies.png"><meta name="og:image" content="floppies.png"><title>troubles.md</title><style rel="stylesheet" type="text/css">@import url("https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square");
 
-            document.getElementById('subtitle').innerHTML = possibilities[Math.floor(possibilities.length * Math.random())];
-        };
-    </script>
-</head>
+/* Light theme by default */
+:root {
+    --main-header-font: "Bevan", monospace;
+    --secondary-header-font: "Sanchez", monospace;
+    --body-font: "Lato", sans-serif;
+    --code-font: "Cascadia Mono", monospace;
+    --default-inset: 11pt;
+    --expanded-inset: 20pt;
+    --title-inset: 28pt;
+    --background-color: #fff;
+    --header-font-color: #777;
+    --font-color: #000;
+    --pre-font-color: #333;
+    --date-color: #667;
+    --code-background-color: #f7f7f7;
+    --accent-color: #0594cb;
+}
 
-<body>
+@counter-style custom {
+    system: cyclic;
+    symbols: "┃";
+    suffix: " ";
+}
 
-<header>
-    
-    <span>
-        <a href="http://troubles.md/" class="title"><strong>troubles.md</strong></a>
-        <span class="dash"> - </span><p id="subtitle" class="subtitle">A high-level view of low-level code</p>
-        
-        
-    </span>
-    
-    <a class="rss" href="http://troubles.md/index.xml">
-        <strong>
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="feather feather-rss"
-            >
-                <path d="M4 11a9 9 0 0 1 9 9">
-                </path>
-                <path d="M4 4a16 16 0 0 1 16 16">
-                </path>
-                <circle cx="5" cy="19" r="1">
-                </circle>
-            </svg>
-        </strong>
-    </a>
-</header>
+.code-dark {
+    display: none;
+}
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #252525;
+        --header-font-color: #aaa;
+        --font-color: #eee;
+        --pre-font-color: #bababa;
+        --date-color: #999;
+        --code-background-color: #333;
+    }
 
-<div class="content">
-    <h1> Posts</h1>
-    
-        <p>
-        <aside>March 16, 2020</aside>
-        <a href="http://troubles.md/abusing-rustc/" style="color:black;">Inviting God&#39;s Wrath with Cursed Rust</a>
-        </p>
-    
-        <p>
-        <aside>May 4, 2019</aside>
-        <a href="http://troubles.md/lightbeam/" style="color:black;">Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler</a>
-        </p>
-    
-        <p>
-        <aside>January 31, 2019</aside>
-        <a href="http://troubles.md/microwasm/" style="color:black;">WebAssembly Troubles part 4: Microwasm</a>
-        </p>
-    
-        <p>
-        <aside>January 31, 2019</aside>
-        <a href="http://troubles.md/the-stack-is-not-the-stack/" style="color:black;">WebAssembly Troubles part 3: What About Alloca?</a>
-        </p>
-    
-        <p>
-        <aside>January 30, 2019</aside>
-        <a href="http://troubles.md/why-do-we-need-the-relooper-algorithm-again/" style="color:black;">WebAssembly Troubles part 2: Why Do We Need the Relooper Algorithm, Again?</a>
-        </p>
-    
-        <p>
-        <aside>January 30, 2019</aside>
-        <a href="http://troubles.md/wasm-is-not-a-stack-machine/" style="color:black;">WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine</a>
-        </p>
-    
-        <p>
-        <aside>September 12, 2018</aside>
-        <a href="http://troubles.md/fork-free-upgrading/" style="color:black;">Never Fork Again</a>
-        </p>
-    
-        <p>
-        <aside>September 4, 2018</aside>
-        <a href="http://troubles.md/comparison-of-inter-blockchain-communication-technologies/" style="color:black;">Comparison of Inter-Blockchain Communication Technologies</a>
-        </p>
-    
-        <p>
-        <aside>August 7, 2018</aside>
-        <a href="http://troubles.md/why-wasm/" style="color:black;">Wasm on the Blockchain: The Lesser Evil</a>
-        </p>
-    
-        <p>
-        <aside>July 5, 2018</aside>
-        <a href="http://troubles.md/why-write-smart-contracts-in-rust/" style="color:black;">Why Write Smart Contracts in Rust?</a>
-        </p>
-    
-        <p>
-        <aside>July 3, 2018</aside>
-        <a href="http://troubles.md/what-is-substrate/" style="color:black;">What is Parity Substrate?</a>
-        </p>
-    
-        <p>
-        <aside>June 5, 2018</aside>
-        <a href="http://troubles.md/why-phantomdata/" style="color:black;">Why PhantomData</a>
-        </p>
-    
-        <p>
-        <aside>May 22, 2018</aside>
-        <a href="http://troubles.md/rustfest-2018-workshop/" style="color:black;">Fastware Workshop</a>
-        </p>
-    
-        <p>
-        <aside>May 17, 2018</aside>
-        <a href="http://troubles.md/improving-smallvec/" style="color:black;">Improving SmallVec&#39;s speed by 60% and why that shouldn&#39;t matter to you</a>
-        </p>
-    
-        <p>
-        <aside>May 15, 2018</aside>
-        <a href="http://troubles.md/i-triple-equals/" style="color:black;">In which the CPU changes my data under my nose</a>
-        </p>
-    
-        <p>
-        <aside>May 14, 2018</aside>
-        <a href="http://troubles.md/rust-smart-contracts/" style="color:black;">Towards a Brighter Future for Smart Contracts</a>
-        </p>
-    
-        <p>
-        <aside>May 11, 2018</aside>
-        <a href="http://troubles.md/the-power-of-compilers/" style="color:black;">How a Rust upgrade more than tripled the speed of my code</a>
-        </p>
-    
-        <p>
-        <aside>May 17, 2017</aside>
-        <a href="http://troubles.md/rust-optimization/" style="color:black;">Acheiving warp speed with Rust</a>
-        </p>
-    
-</div>
+    footer img {
+        filter: invert();
+    }
 
+    .code-dark {
+        display: block;
+    }
 
+    .code-light {
+        display: none;
+    }
+}
 
-<footer>
-	<p>© 2017-2018, all rights reserved.</a>
-</footer>
-</body>
-</html>
+body {
+    background-color: var(--background-color);
+    color: var(--font-color);
+}
+
+body,
+li p {
+    font-family: var(--body-font), sans-serif;
+    letter-spacing: 0.15pt;
+    word-spacing: 0.08pt;
+    line-height: 1.8;
+}
+
+h2,
+h3 {
+    --line-width: 9pt;
+    --inset: var(--title-inset);
+
+    display: flex;
+    flex-direction: row;
+    background-color: var(--code-background-color);
+    border-left: var(--line-width) solid var(--accent-color);
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+    padding-left: calc(var(--inset) - var(--line-width));
+    padding-right: 0.6rem;
+    padding-bottom: 0.2rem;
+    margin-top: 2.1rem;
+    margin-bottom: 0.4rem;
+}
+
+h2 span,
+h3 span {
+    display: none;
+}
+
+h2 .section-title,
+h3 .section-title {
+    display: inline-block;
+}
+
+.section-link-postfix {
+    display: flex;
+
+    flex-direction: column;
+    justify-content: space-around;
+
+    font-family: var(--body-font);
+    font-size: 90%;
+    padding-left: 12pt;
+    margin-left: auto;
+}
+
+.section-link-postfix a {
+    opacity: 0.7;
+    color: var(--header-font-color);
+}
+
+h2 a span,
+h3 a span {
+    font-size: 18px;
+    color: var(--code-background-color);
+}
+
+h2 a span {
+    padding-top: 0.5rem;
+}
+
+h3 a span {
+    padding-top: 0.1rem;
+}
+
+h2 .section-link a:hover,
+h3 .section-link a:hover {
+    background-color: var(--accent-color);
+}
+
+h2 .section-link a:hover span,
+h3 .section-link a:hover span {
+    display: block;
+}
+
+a .section-link {
+    font-size: calc(100% * var(--font-perc));
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--secondary-header-font), serif;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+}
+
+a code {
+    color: var(--accent-color);
+}
+
+h1 {
+    font-family: var(--main-header-font), serif;
+    font-weight: normal;
+    letter-spacing: 1pt;
+    display: block;
+    font-size: 250%;
+    line-height: 1.2;
+    padding-top: 0.02em;
+    margin-top: 1em;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+h2 {
+    font-size: 170%;
+}
+
+h3 {
+    font-size: 120%;
+}
+
+.post-link {
+    margin-bottom: 1em;
+}
+
+.post-link a {
+    font-family: var(--secondary-header-font);
+    color: var(--font-color);
+}
+
+header .blog-name a {
+    font-family: "Nova Square";
+    font-size: 130%;
+    letter-spacing: 3pt;
+    color: var(--font-color);
+    border-right: 3px solid var(--accent-color);
+}
+
+@keyframes blink-cursor {
+    50% {
+        border-right: unset;
+    }
+}
+
+header .blog-name a:hover {
+    animation: blink-cursor 1s linear infinite;
+}
+
+header,
+header a {
+    color: var(--header-font-color);
+    text-decoration: none;
+}
+
+/* reset */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    height: 100%;
+}
+
+li:target {
+    background-color: var(--code-background-color);
+}
+
+body {
+    padding: 0rem 0em 0rem 0em;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "kern=1";
+    -moz-font-feature-settings: "kern" 1;
+    -webkit-font-feature-settings: "kern" 1;
+    -o-font-feature-settings: "kern" 1;
+    -ms-font-feature-settings: "kern" 1;
+    font-feature-settings: "kern" 1;
+
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "liga=1";
+    -moz-font-feature-settings: "liga" 1;
+    -webkit-font-feature-settings: "liga" 1;
+    -o-font-feature-settings: "liga" 1;
+    -ms-font-feature-settings: "liga" 1;
+    font-feature-settings: "liga" 1;
+}
+
+.spon {
+    width: 100%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 14px;
+    background-color: rgb(243, 243, 165);
+    border-left: 3px solid var(--font-color);
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    padding-left: 12px;
+    padding-top: 5px;
+}
+
+.attribution {
+    display: block;
+    font-size: 18px;
+    font-family: "Montserrat", sans-serif;
+    width: 100%;
+    line-height: 1.8;
+    margin-top: 5px;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+header {
+    --inset: var(--title-inset);
+
+    font-family: "Cascadia Mono";
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.2;
+    justify-content: space-between;
+    /*background-color: var(--code-background-color);*/
+    display: flex;
+    letter-spacing: 0.7pt;
+    align-items: center;
+    padding: 0.5rem var(--inset);
+    border-bottom: 0.1em solid var(--header-font-color);
+    margin-bottom: 1.5rem;
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+}
+
+header a:hover {
+    color: var(--header-font-color);
+}
+
+.blog-name {
+    font-weight: 900;
+    justify-self: start;
+}
+
+.tagline {
+    justify-self: end;
+    font-weight: 100;
+}
+
+.blog-name,
+.tagline {
+    margin-bottom: 0px;
+    text-decoration: none;
+}
+
+footer {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 180px;
+}
+
+footer img {
+    width: 30px;
+    height: 30px;
+}
+
+.footnotes li p {
+    display: inline;
+}
+
+.ft-return-link {
+    display: inline;
+    margin-left: 0.5em;
+}
+
+.title {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.title aside {
+    width: 100%;
+    text-align: right;
+}
+
+.post-link:first-of-type {
+    margin-top: 1rem;
+}
+
+.post-link {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.post-link aside {
+    min-width: 152px;
+}
+
+.post-link a {
+    padding-left: var(--default-inset);
+    margin-left: calc(-1 * var(--default-inset));
+    line-height: 1.6;
+    padding-right: 1.5rem;
+    flex-grow: 1;
+}
+
+aside {
+    font-family: "Lato", sans-serif;
+    font-size: 0.84rem;
+    align-self: center;
+    line-height: 1.4;
+    color: var(--date-color);
+    text-align: right;
+    margin-right: 1em;
+    text-wrap-mode: nowrap;
+}
+
+aside em {
+    font-size: 0.7rem;
+}
+
+p {
+    margin-bottom: 1em;
+}
+
+ul {
+    list-style: custom;
+}
+
+ul li::marker {
+    color: var(--accent-color);
+}
+
+ol li::marker {
+    color: var(--header-font-color);
+}
+
+li li::marker {
+    color: var(--date-color);
+}
+
+ul {
+    margin-bottom: 1em;
+}
+
+ul ul,
+ol ol {
+    margin-bottom: 0;
+    padding-left: 1em;
+}
+
+li p {
+    margin-bottom: 0;
+}
+
+li {
+    padding-left: 0.3em;
+    margin-left: 1em;
+    margin-bottom: 0.5em;
+}
+
+table {
+    margin-bottom: 1.5em;
+    border-collapse: collapse;
+    width: 95%;
+}
+
+table tr + tr {
+    border-top: 1px solid #ccc;
+}
+table td + td {
+    border-left: 1px solid #ccc;
+}
+
+table td {
+    padding: 0.4em;
+    text-align: center;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+table th {
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 95%;
+    padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+    line-height: 1.05;
+}
+
+img {
+    width: 100%;
+}
+
+a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+div.nav a:active div {
+    background: #cacaca;
+}
+
+a:active {
+    color: var(--header-font-color);
+}
+
+a:hover {
+    background: var(--code-background-color);
+}
+
+.post-link a:hover {
+    color: var(--date-color);
+}
+
+pre {
+    margin-left: var(--expanded-inset);
+    margin-right: var(--expanded-inset);
+    padding-left: 1.4em;
+    padding-top: 1em;
+    padding-bottom: 1em;
+    margin-bottom: 1em;
+    background-color: var(--code-background-color);
+    overflow: auto;
+    line-height: 1.5;
+    letter-spacing: -0.2pt;
+    border-left: 3.5px solid #bbb;
+    font-size: 85%;
+}
+
+code {
+    font-family: var(--code-font), monospace;
+    color: var(--pre-font-color);
+    display: inline-block;
+    max-width: 100%;
+    font-variant-ligatures: none;
+    text-rendering: auto;
+    -moz-font-feature-settings: "liga=0";
+    -moz-font-feature-settings: "liga" 0;
+    -webkit-font-feature-settings: "liga" 0;
+    -o-font-feature-settings: "liga" 0;
+    -ms-font-feature-settings: "liga" 0;
+    font-feature-settings: "liga" 0;
+}
+
+h1 > code,
+h2 > code,
+h3 > code,
+h4 > code,
+p > code {
+    display: inline-block;
+    text-transform: none;
+    padding-left: 0.1em;
+    padding-right: 0.1em;
+    font-size: 103%;
+    color: var(--pre-font-color);
+}
+
+figcaption {
+    font-weight: 400;
+    font-style: italic;
+    font-size: 0.7em/1.52;
+    line-height: 1.3;
+    color: #666665;
+    outline: 0;
+    z-index: 300;
+    text-align: center;
+}
+
+blockquote {
+    border-left: 3.5px solid var(--accent-color);
+    margin: 10px var(--expanded-inset);
+    padding: var(--default-inset) 20px;
+}
+
+blockquote p {
+    display: inline;
+}
+
+.content {
+    margin-bottom: 30px;
+}
+
+@media all {
+    html {
+        font-size: 18px;
+    }
+    .main {
+        margin-left: 7.5rem;
+        margin-right: 7.5rem;
+    }
+}
+@media all and (max-width: 1200px) {
+    pre {
+        margin-left: var(--default-inset);
+        margin-right: var(--default-inset);
+    }
+
+    blockquote {
+        margin: 0.7em var(--default-inset);
+    }
+}
+@media all and (max-width: 840px) {
+    h2,
+    h3 {
+        padding-left: var(--default-inset);
+        padding-right: var(--default-inset);
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    .post-link {
+        flex-direction: column-reverse;
+        justify-content: unset;
+    }
+
+    .post-link aside {
+        align-self: start;
+        text-align: left;
+    }
+
+    .title h1 {
+        text-align: center;
+    }
+
+    .main {
+        margin-left: 4rem;
+        margin-right: 4rem;
+    }
+}
+@media all and (max-width: 760px) {
+    .title h1 {
+        font-size: 24pt;
+    }
+
+    .main {
+        margin-left: 2.5rem;
+        margin-right: 2.5rem;
+    }
+}
+@media all and (max-width: 580px) {
+    .title h1 {
+        font-size: 20pt;
+    }
+
+    .tagline {
+        display: block;
+        font-size: 12px;
+    }
+
+    h2,
+    h3 {
+        --line-width: 4pt;
+        --inset: var(--default-inset);
+
+        margin-top: 0.4em;
+        padding-left: calc(var(--inset) - var(--line-width));
+    }
+
+    h2 .section-link,
+    h3 .section-link {
+        display: none;
+    }
+
+    h2 {
+        padding-top: 2pt;
+        font-size: 20pt;
+        padding-bottom: 2pt;
+    }
+
+    h3 {
+        font-size: 17pt;
+    }
+
+    aside.date-short {
+        display: none;
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    body,
+    li p {
+        line-height: 1.5;
+    }
+
+    header .separator {
+        visibility: collapse;
+    }
+
+    .main {
+        margin: 0 var(--default-inset);
+    }
+}
+</style></head><body><div class="main"><header><span class="blog-name"><a href="#">troubles.md</a></span> <span class="tagline">Writing words and reading dwords</span></header><span></span><div class="content"><h1>Posts</h1><div class="post-link"><a href="abusing-rustc/index.html">Inviting God's Wrath with Cursed Rust</a><aside>16 March, 2020</aside></div><div class="post-link"><a href="lightbeam/index.html">Introducing Lightbeam: An Optimising Streaming WebAssembly Compiler</a><aside>04 May, 2019</aside></div><div class="post-link"><a href="microwasm/index.html">WebAssembly Troubles part 4: Microwasm</a><aside>31 January, 2019</aside></div><div class="post-link"><a href="the-stack-is-not-the-stack/index.html">WebAssembly Troubles part 3: What About Alloca?</a><aside>30 January, 2019</aside></div><div class="post-link"><a href="why-do-we-need-the-relooper-algorithm-again/index.html">WebAssembly Troubles part 2: Why Do We Need the Relooper Algorithm, Again?</a><aside>29 January, 2019</aside></div><div class="post-link"><a href="wasm-is-not-a-stack-machine/index.html">WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine</a><aside>28 January, 2019</aside></div><div class="post-link"><a href="fork-free-upgrading/index.html">Never Fork Again</a><aside>12 September, 2018</aside></div><div class="post-link"><a href="comparison-of-inter-blockchain-communication-technologies/index.html">Comparison of Inter-Blockchain Communication Technologies</a><aside>04 September, 2018</aside></div><div class="post-link"><a href="why-wasm/index.html">Wasm on the Blockchain: The Lesser Evil</a><aside>07 August, 2018</aside></div><div class="post-link"><a href="why-write-smart-contracts-in-rust/index.html">Why Write Smart Contracts in Rust?</a><aside>05 July, 2018</aside></div><div class="post-link"><a href="what-is-substrate/index.html">What is Parity Substrate?</a><aside>03 July, 2018</aside></div><div class="post-link"><a href="why-phantomdata/index.html">Why PhantomData</a><aside>05 June, 2018</aside></div><div class="post-link"><a href="improving-smallvec/index.html">Improving SmallVec's speed by 60% and why that shouldn't matter to you</a><aside>17 May, 2018</aside></div><div class="post-link"><a href="i-triple-equals/index.html">In which the CPU changes my data under my nose</a><aside>15 May, 2018</aside></div><div class="post-link"><a href="rust-smart-contracts/index.html">Towards a Brighter Future for Smart Contracts</a><aside>14 May, 2018</aside></div><div class="post-link"><a href="the-power-of-compilers/index.html">How a Rust upgrade more than tripled the speed of my code</a><aside>11 May, 2018</aside></div><div class="post-link"><a href="rust-optimization/index.html">Achieving warp speed with Rust</a><aside>17 May, 2017</aside></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>

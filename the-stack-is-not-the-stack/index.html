@@ -1,188 +1,791 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>WebAssembly Troubles part 3: What About Alloca?</title>
-    
-    <meta name="description" content="">
-    
-    <meta itemprop="name" content="WebAssembly Troubles part 3: What About Alloca?">
-    
-    
-    <meta name="og:title" content="WebAssembly Troubles part 3: What About Alloca?">
-    
-        <meta name="image" content="http://troubles.md/floppies.png">
-        <meta name="og:image" content="http://troubles.md/floppies.png">
-       <meta name="og:url" content="http://troubles.md/the-stack-is-not-the-stack/">
-    <meta name="og:site_name" content="WebAssembly Troubles part 3: What About Alloca?">
-    <meta name="og:type" content="article">
-    
-    <meta name="article:tag" content="">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/style.css">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/syntax.css">
-    <script async>
-        window.onload = function() {
-            var possibilities = [
-                 "A high-level view of low-level code",  "Writing words and reading DWORDS", 
-            ];
+<!DOCTYPE html><html><head><meta name="og:type" content="article"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="og:title" content="WebAssembly Troubles part 3: What About Alloca?"><meta itemprop="name" content="WebAssembly Troubles part 3: What About Alloca?"><meta name="image" content="floppies.png"><meta name="og:image" content="floppies.png"><title>WebAssembly Troubles part 3: What About Alloca? - troubles.md</title><style rel="stylesheet" type="text/css">@import url("https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square");
 
-            document.getElementById('subtitle').innerHTML = possibilities[Math.floor(possibilities.length * Math.random())];
-        };
-    </script>
-</head>
+/* Light theme by default */
+:root {
+    --main-header-font: "Bevan", monospace;
+    --secondary-header-font: "Sanchez", monospace;
+    --body-font: "Lato", sans-serif;
+    --code-font: "Cascadia Mono", monospace;
+    --default-inset: 11pt;
+    --expanded-inset: 20pt;
+    --title-inset: 28pt;
+    --background-color: #fff;
+    --header-font-color: #777;
+    --font-color: #000;
+    --pre-font-color: #333;
+    --date-color: #667;
+    --code-background-color: #f7f7f7;
+    --accent-color: #0594cb;
+}
 
-<body>
+@counter-style custom {
+    system: cyclic;
+    symbols: "┃";
+    suffix: " ";
+}
 
-<header>
-    
-    <span>
-        <a href="http://troubles.md/" class="title"><strong>troubles.md</strong></a>
-        <span class="dash"> - </span><p id="subtitle" class="subtitle">A high-level view of low-level code</p>
-        
-        
-    </span>
-    
-    <a class="rss" href="http://troubles.md/index.xml">
-        <strong>
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="feather feather-rss"
-            >
-                <path d="M4 11a9 9 0 0 1 9 9">
-                </path>
-                <path d="M4 4a16 16 0 0 1 16 16">
-                </path>
-                <circle cx="5" cy="19" r="1">
-                </circle>
-            </svg>
-        </strong>
-    </a>
-</header>
+.code-dark {
+    display: none;
+}
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #252525;
+        --header-font-color: #aaa;
+        --font-color: #eee;
+        --pre-font-color: #bababa;
+        --date-color: #999;
+        --code-background-color: #333;
+    }
 
-<div class="content">
-  <h1>WebAssembly Troubles part 3: What About Alloca? <aside></aside></h1>
-  <blockquote>
-<h3 id="preamble">Preamble</h3>
-<p>This is part 3 of a 4-part miniseries on issues with WebAssembly and proposals to fix them. <a href="http://troubles.md/wasm-is-not-a-stack-machine/">Part 1 here</a>, <a href="http://troubles.md/why-do-we-need-the-relooper-algorithm-again/">part 2 here</a>, <a href="http://troubles.md/microwasm/">part 4 here</a>.
-<!-- raw HTML omitted --><!-- raw HTML omitted -->
-This article assumes some familiarity with virtual machines, compilers and WebAssembly, but I&rsquo;ll try to link to relevant information where necessary so even if you&rsquo;re not you can follow along.
-<!-- raw HTML omitted --><!-- raw HTML omitted -->
-Also, this series is going to come off as if I dislike WebAssembly. I love WebAssembly! I wrote a <a href="http://troubles.md/why-wasm/">whole article about how great it is</a>! In fact, I love it so much that I want it to be the best that it can be, and this series is me working through my complaints with the design in the hope that some or all of these issues can be addressed soon, while the ink is still somewhat wet on the specification.</p>
-</blockquote>
-<p>If you read my <a href="http://troubles.md/wasm-is-not-a-stack-machine/">first article in this series</a>, you&rsquo;ll know that WebAssembly has both locals and the stack. I made the argument that locals are not just unnecessary, but are detrimental to the performance of WebAssembly in general, and that if we used the stack alone our code would be in SSA form with lifetime information automatically. However, if you&rsquo;re familiar with LLVM IR or other SSA IRs you might be familiar with an operator known as <code>alloca</code>, which circumvents SSA form. Why does LLVM need that escape hatch while I argue that WebAssembly does not?</p>
-<p>Well, here&rsquo;s a thought experiment for you: what WebAssembly does LLVM emit for the following Rust code?</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">extern</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">fn</span> <span class="nf">test</span><span class="p">(</span><span class="n">_</span>: <span class="kp">&amp;</span><span class="nc">mut</span><span class="w"> </span><span class="kt">u32</span><span class="p">);</span><span class="w"> </span><span class="p">}</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="k">fn</span> <span class="nf">main</span><span class="p">(){</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">
-</span><span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">test</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">a</span><span class="p">)</span><span class="w"> </span><span class="p">};</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>In LLVM&rsquo;s IR this is represented using <code>alloca</code>, which allocates a value on the physical stack and returns a pointer to the new value. In WebAssembly, however, you cannot create pointers to locals, so <code>alloca</code> has to be compiled another way. Let&rsquo;s have a look at the emitted WebAssembly when compiled in release mode. I&rsquo;ve simplified it by hand to make it clearer what&rsquo;s going on.</p>
-<div class="highlight"><pre class="chroma"><code class="language-lisp" data-lang="lisp"><span class="p">(</span><span class="nv">module</span>
-  <span class="p">(</span><span class="nf">import</span> <span class="s">&#34;env&#34;</span> <span class="s">&#34;test&#34;</span> <span class="p">(</span><span class="nv">func</span> <span class="nv">$test</span> <span class="p">(</span><span class="nv">param</span> <span class="nv">i32</span><span class="p">)))</span>
-  <span class="p">(</span><span class="nv">func</span> <span class="nv">$main</span>
-    <span class="p">(</span><span class="nv">local</span> <span class="nv">$local_sp</span> <span class="nv">i32</span><span class="p">)</span>
-    <span class="p">(</span><span class="nv">global.set</span> <span class="nv">$stack_ptr</span>
-      <span class="p">(</span><span class="nv">local.tee</span> <span class="nv">$local_sp</span>
-        <span class="p">(</span><span class="nv">i32.sub</span>
-          <span class="p">(</span><span class="nv">global.get</span> <span class="nv">$stack_ptr</span><span class="p">)</span>
-          <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">16</span><span class="p">))))</span>
-    <span class="p">(</span><span class="nv">i32.store</span> <span class="nv">offset=12</span>
-      <span class="p">(</span><span class="nv">local.get</span> <span class="nv">$local_sp</span><span class="p">)</span>
-      <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">0</span><span class="p">))</span>
-    <span class="p">(</span><span class="nv">call</span> <span class="nv">$test</span>
-      <span class="p">(</span><span class="nv">i32.add</span>
-        <span class="p">(</span><span class="nv">local.get</span> <span class="nv">$local_sp</span><span class="p">)</span>
-        <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">12</span><span class="p">)))</span>
-    <span class="p">(</span><span class="nv">global.set</span> <span class="nv">$stack_ptr</span>
-      <span class="p">(</span><span class="nv">i32.add</span>
-        <span class="p">(</span><span class="nv">local.get</span> <span class="nv">$local_sp</span><span class="p">)</span>
-        <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">16</span><span class="p">))))</span>
-  <span class="p">(</span><span class="nv">memory</span> <span class="nv">$memory</span> <span class="p">(</span><span class="nf">export</span> <span class="s">&#34;memory&#34;</span><span class="p">)</span> <span class="mi">17</span><span class="p">)</span>
-  <span class="p">(</span><span class="nv">global</span> <span class="nv">$stack_ptr</span> <span class="p">(</span><span class="nv">mut</span> <span class="nv">i32</span><span class="p">)</span> <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">1048576</span><span class="p">)))</span>
-</code></pre></div><p>Gross. LLVM generates a mutable global (similar to <code>static mut</code> in Rust) which it then does arithmetic on manually to manipulate the stack. Accessing the stack is suppposed to be extremely fast, and in fact if you compile the Rust code directly to native it looks something like this<sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>:</p>
-<div class="highlight"><pre class="chroma"><code class="language-gas" data-lang="gas"><span class="nl">main:</span>
-    <span class="nf">push</span> <span class="no">rax</span>
-    <span class="nf">mov</span>  <span class="no">dword</span> <span class="no">ptr</span> <span class="p">[</span><span class="no">rsp</span> <span class="err">+</span> <span class="mi">4</span><span class="p">],</span> <span class="mi">0</span>
-    <span class="nf">lea</span>  <span class="no">rdi</span><span class="p">,</span>                 <span class="p">[</span><span class="no">rsp</span> <span class="err">+</span> <span class="mi">4</span><span class="p">]</span>
-    <span class="nf">call</span> <span class="no">qword</span> <span class="no">ptr</span> <span class="p">[</span><span class="no">rip</span> <span class="err">+</span> <span class="no">test@GOTPCREL</span><span class="p">]</span>
-    <span class="nf">pop</span>  <span class="no">rax</span>
-    <span class="nf">ret</span>
-</code></pre></div><p>Contrast this assembly output with the assembly generated by Firefox for the above Wasm (simplified):</p>
-<div class="highlight"><pre class="chroma"><code class="language-gas" data-lang="gas"><span class="nl">main:</span>
-  <span class="nf">sub</span> <span class="no">rsp</span><span class="p">,</span>                         <span class="mi">0x28</span>
-  <span class="nf">cmp</span> <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x28</span><span class="p">],</span>                <span class="no">rsp</span>
-  <span class="c">; .Lstack-overflow is defined elsewhere
-</span><span class="c"></span>  <span class="nf">jae</span> <span class="no">.Lstack-overflow</span> 
+    footer img {
+        filter: invert();
+    }
 
-  <span class="no">mov</span> <span class="no">edi</span><span class="p">,</span>                         <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x50</span><span class="p">]</span>
-  <span class="nf">mov</span> <span class="no">eax</span><span class="p">,</span>                         <span class="no">edi</span>
-  <span class="nf">sub</span> <span class="no">eax</span><span class="p">,</span>                         <span class="mi">0x10</span>
-  <span class="nf">mov</span> <span class="p">[</span><span class="no">rsp</span> <span class="err">+</span> <span class="mi">0x1c</span><span class="p">],</span>                <span class="no">eax</span>
-  <span class="nf">mov</span> <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x50</span><span class="p">],</span>                <span class="no">eax</span>
-  <span class="nf">mov</span> <span class="p">[</span><span class="no">r15</span> <span class="err">+</span> <span class="no">rax</span> <span class="err">+</span> <span class="mi">0xc</span><span class="p">],</span>           <span class="mi">0</span>
-  <span class="nf">add</span> <span class="no">edi</span><span class="p">,</span>                         <span class="p">-</span><span class="mi">4</span>
-  <span class="nf">mov</span> <span class="p">[</span><span class="no">rsp</span><span class="p">],</span>                       <span class="no">r14</span>
-  <span class="nf">mov</span> <span class="no">rax</span><span class="p">,</span>                         <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x30</span><span class="p">]</span>
-  <span class="nf">mov</span> <span class="no">r14</span><span class="p">,</span>                         <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x38</span><span class="p">]</span>
-  <span class="nf">mov</span> <span class="no">r15</span><span class="p">,</span>                         <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x18</span><span class="p">]</span>
-  <span class="nf">call</span> <span class="no">rax</span>
-  <span class="nf">mov</span> <span class="no">r14</span><span class="p">,</span>                         <span class="p">[</span><span class="no">rsp</span><span class="p">]</span>
-  <span class="nf">mov</span> <span class="no">r15</span><span class="p">,</span>                         <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x18</span><span class="p">]</span>
-  <span class="nf">mov</span> <span class="no">eax</span><span class="p">,</span>                         <span class="p">[</span><span class="no">rsp</span> <span class="err">+</span> <span class="mi">0x1c</span><span class="p">]</span>
-  <span class="nf">add</span> <span class="no">eax</span><span class="p">,</span>                         <span class="mi">0x10</span>
-  <span class="nf">mov</span> <span class="p">[</span><span class="no">r14</span> <span class="err">+</span> <span class="mi">0x50</span><span class="p">],</span>                <span class="no">eax</span>
-  <span class="nf">nop</span>
-  <span class="nf">add</span> <span class="no">rsp</span><span class="p">,</span>                         <span class="mi">0x28</span>
-  <span class="nf">ret</span>
-</code></pre></div><p>Some of this is important for WebAssembly&rsquo;s sandboxing, but I hope you can see that the <code>stack_ptr</code> global is being loaded and stored to memory every time. This isn&rsquo;t the baseline compiler, this is Firefox&rsquo;s optimising compiler, and as far as I can tell Firefox&rsquo;s output for WebAssembly is the fastest of any browser at time of writing.</p>
-<p>So how do we solve this?</p>
-<h2 id="separate-stack-and-heap">Separate stack and heap</h2>
-<p>The fix that I originally wanted to implement for this is to either have an <code>alloca</code> instruction or have each function/block declare a set of variables to be stored on the physical stack. Unfortunately, this is a total non-starter. Currently pointers in Wasm are just 32-bit integers, which means that arbitrary arithmetic can be performed on them. If you want the stack pointers to refer what I call the &ldquo;physical stack&rdquo; you&rsquo;re out of luck (what I call the physical stack is the area of memory around <code>rsp</code>, like we saw LLVM generate code to access when generating native code). A malicious Wasm module could just manipulate a pointer to a stack value and overwrite the return address. PNaCl implements this method and prevents the return address from being manipulated by masking the return address when the function returns, which ensures that you can only jump to known-safe addresses. Unfortunately, manipulating the return address like this means that every single function call results in a pipeline stall since the CPU can&rsquo;t start speculatively executing the code that we&rsquo;re returning to.</p>
-<p>That&rsquo;s not the only problem though. Currently, the Wasm heap is untyped, which is very important for efficient compilation of languages like C and Rust that rely on viewing the heap as a blob of bytes. Heap pointers are just indices into a blob of memory. If the heap and stack were separate, there would be no good way to compile this code:</p>
-<div class="highlight"><pre class="chroma"><code class="language-rust" data-lang="rust"><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Box</span>::<span class="n">new</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">bar</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">some_vec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">vec</span><span class="o">!</span><span class="p">[</span><span class="o">&amp;*</span><span class="n">foo</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">bar</span><span class="p">];</span><span class="w">
-</span><span class="w"></span><span class="p">}</span><span class="w">
-</span></code></pre></div><p>Here we&rsquo;re storing one heap pointer and one stack pointer in an array which is itself stored on the heap. Separated stack and heap pointers means that this is impossible - you either need the heap to be typed <em>or</em> you need to allow manipulating the pointer to the stack value, the former is extremely slow and the latter could cause the sandboxed code to overwrite memory that it shouldn&rsquo;t have access to.</p>
-<p>A variant of this idea that would be more likely to work is to have our method of specifying variables to be stored on the physical stack also specify a linear memory section to store the stack values in. This would basically have the same semantics as the current implementation generated by LLVM but it would give the Wasm runtime more information, making it easier to optimise. However, I don&rsquo;t believe that this would produce better code than option 2:</p>
-<h2 id="explicit-stack-pointer">Explicit stack pointer</h2>
-<p>&ldquo;So&rdquo;, you ask, &ldquo;why not just reserve a register for this global variable?&quot;. Well I&rsquo;m glad you asked, straw man in my head. Although it wouldn&rsquo;t solve every problem, having the stack pointer be stored in a global variable would improve performance significantly and allow for much better code. It still couldn&rsquo;t match native, but it would get a lot closer.</p>
-<p>The issue is that the global used for the stack pointer isn&rsquo;t marked. The Wasm-&gt;native compiler doesn&rsquo;t know that <code>stack_ptr</code> is the stack pointer and so needs to be fast to access.</p>
-<p>So, the second possibility - which I believe has been suggested before although I can&rsquo;t find the issue where it was mentioned - is to explicitly mark one or more globals as &ldquo;hot&rdquo;, which can act as a hint to the compiler that a register should be reserved for this global. The stack pointer can then be marked as &ldquo;hot&rdquo; and WebAssembly runtimes that don&rsquo;t care about maximising performance (like the spec interpreter or <a href="https://github.com/paritytech/wasmi">wasmi</a>) can ignore this hint. The biggest downside to this scheme is that it forces an ambient loss of a scratch register - simply having &ldquo;hot&rdquo; and &ldquo;cold&rdquo; globals is very course-grained and means that (for example) the Wasm can&rsquo;t explicitly state that this global is cold in certain functions, which would allow those functions to use that register as scratch as long as they save and restore it<sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup>. If your compiler has a decent instruction-choosing algorithm then codegen with this scheme should look relatively similar to the native code generated by LLVM. Unlike some complicated optimisations, however, I would consider implementing a good instruction choice algorithm to be the main job of a compiler from WebAssembly to native. It wouldn&rsquo;t require extra, stack pointer-specific work in order to get this to compile to good code.</p>
-<p>Personally, I believe that the second option is the best.</p>
-<h2 id="why-isnt-this-implemented-already">Why isn&rsquo;t this implemented already?</h2>
-<p>Unlike the past two articles, this is pretty clearly not a fundamental design issue that should have been fixed for the MVP. This can easily be added in a backwards-compatible way - existing code can&rsquo;t take advantage of this optimisation but any new code will be able to. Hopefully this article gave you some insight into why the stack isn&rsquo;t quite as optimised as it should be in contemporary WebAssembly runtimes.</p>
-<p>Join me next time where I finally inject some positivity into this series, and propose a medium-term solution to these issues and more.</p>
-<section class="footnotes" role="doc-endnotes">
-<hr>
-<ol>
-<li id="fn:1" role="doc-endnote">
-<p>The <code>push</code> and <code>pop</code> are to reserve space on the stack, it&rsquo;s better if you need to reserve &lt;8 bytes to use <code>push</code> and <code>pop</code> instead of doing arithmetic on the stack pointer yourself. <a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:2" role="doc-endnote">
-<p>Why not simply have every function mark which globals are hot and which are cold? Well, we have code size constraints, and having to say this on every function will bloat the format. More bloat means more bytes have to be transferred over the wire, which is something that the WebAssembly format is explicitly designed to prevent. Maybe a future extension to the format could have globals either hot or cold <em>by default</em>, allowing functions or even blocks to override that if they so wish. <a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-</ol>
-</section>
+    .code-dark {
+        display: block;
+    }
 
-</div>
+    .code-light {
+        display: none;
+    }
+}
 
-<footer>
-	<p>© 2017-2018, all rights reserved.</a>
-</footer>
-</body>
-</html>
+body {
+    background-color: var(--background-color);
+    color: var(--font-color);
+}
+
+body,
+li p {
+    font-family: var(--body-font), sans-serif;
+    letter-spacing: 0.15pt;
+    word-spacing: 0.08pt;
+    line-height: 1.8;
+}
+
+h2,
+h3 {
+    --line-width: 9pt;
+    --inset: var(--title-inset);
+
+    display: flex;
+    flex-direction: row;
+    background-color: var(--code-background-color);
+    border-left: var(--line-width) solid var(--accent-color);
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+    padding-left: calc(var(--inset) - var(--line-width));
+    padding-right: 0.6rem;
+    padding-bottom: 0.2rem;
+    margin-top: 2.1rem;
+    margin-bottom: 0.4rem;
+}
+
+h2 span,
+h3 span {
+    display: none;
+}
+
+h2 .section-title,
+h3 .section-title {
+    display: inline-block;
+}
+
+.section-link-postfix {
+    display: flex;
+
+    flex-direction: column;
+    justify-content: space-around;
+
+    font-family: var(--body-font);
+    font-size: 90%;
+    padding-left: 12pt;
+    margin-left: auto;
+}
+
+.section-link-postfix a {
+    opacity: 0.7;
+    color: var(--header-font-color);
+}
+
+h2 a span,
+h3 a span {
+    font-size: 18px;
+    color: var(--code-background-color);
+}
+
+h2 a span {
+    padding-top: 0.5rem;
+}
+
+h3 a span {
+    padding-top: 0.1rem;
+}
+
+h2 .section-link a:hover,
+h3 .section-link a:hover {
+    background-color: var(--accent-color);
+}
+
+h2 .section-link a:hover span,
+h3 .section-link a:hover span {
+    display: block;
+}
+
+a .section-link {
+    font-size: calc(100% * var(--font-perc));
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--secondary-header-font), serif;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+}
+
+a code {
+    color: var(--accent-color);
+}
+
+h1 {
+    font-family: var(--main-header-font), serif;
+    font-weight: normal;
+    letter-spacing: 1pt;
+    display: block;
+    font-size: 250%;
+    line-height: 1.2;
+    padding-top: 0.02em;
+    margin-top: 1em;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+h2 {
+    font-size: 170%;
+}
+
+h3 {
+    font-size: 120%;
+}
+
+.post-link {
+    margin-bottom: 1em;
+}
+
+.post-link a {
+    font-family: var(--secondary-header-font);
+    color: var(--font-color);
+}
+
+header .blog-name a {
+    font-family: "Nova Square";
+    font-size: 130%;
+    letter-spacing: 3pt;
+    color: var(--font-color);
+    border-right: 3px solid var(--accent-color);
+}
+
+@keyframes blink-cursor {
+    50% {
+        border-right: unset;
+    }
+}
+
+header .blog-name a:hover {
+    animation: blink-cursor 1s linear infinite;
+}
+
+header,
+header a {
+    color: var(--header-font-color);
+    text-decoration: none;
+}
+
+/* reset */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    height: 100%;
+}
+
+li:target {
+    background-color: var(--code-background-color);
+}
+
+body {
+    padding: 0rem 0em 0rem 0em;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "kern=1";
+    -moz-font-feature-settings: "kern" 1;
+    -webkit-font-feature-settings: "kern" 1;
+    -o-font-feature-settings: "kern" 1;
+    -ms-font-feature-settings: "kern" 1;
+    font-feature-settings: "kern" 1;
+
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "liga=1";
+    -moz-font-feature-settings: "liga" 1;
+    -webkit-font-feature-settings: "liga" 1;
+    -o-font-feature-settings: "liga" 1;
+    -ms-font-feature-settings: "liga" 1;
+    font-feature-settings: "liga" 1;
+}
+
+.spon {
+    width: 100%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 14px;
+    background-color: rgb(243, 243, 165);
+    border-left: 3px solid var(--font-color);
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    padding-left: 12px;
+    padding-top: 5px;
+}
+
+.attribution {
+    display: block;
+    font-size: 18px;
+    font-family: "Montserrat", sans-serif;
+    width: 100%;
+    line-height: 1.8;
+    margin-top: 5px;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+header {
+    --inset: var(--title-inset);
+
+    font-family: "Cascadia Mono";
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.2;
+    justify-content: space-between;
+    /*background-color: var(--code-background-color);*/
+    display: flex;
+    letter-spacing: 0.7pt;
+    align-items: center;
+    padding: 0.5rem var(--inset);
+    border-bottom: 0.1em solid var(--header-font-color);
+    margin-bottom: 1.5rem;
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+}
+
+header a:hover {
+    color: var(--header-font-color);
+}
+
+.blog-name {
+    font-weight: 900;
+    justify-self: start;
+}
+
+.tagline {
+    justify-self: end;
+    font-weight: 100;
+}
+
+.blog-name,
+.tagline {
+    margin-bottom: 0px;
+    text-decoration: none;
+}
+
+footer {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 180px;
+}
+
+footer img {
+    width: 30px;
+    height: 30px;
+}
+
+.footnotes li p {
+    display: inline;
+}
+
+.ft-return-link {
+    display: inline;
+    margin-left: 0.5em;
+}
+
+.title {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.title aside {
+    width: 100%;
+    text-align: right;
+}
+
+.post-link:first-of-type {
+    margin-top: 1rem;
+}
+
+.post-link {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.post-link aside {
+    min-width: 152px;
+}
+
+.post-link a {
+    padding-left: var(--default-inset);
+    margin-left: calc(-1 * var(--default-inset));
+    line-height: 1.6;
+    padding-right: 1.5rem;
+    flex-grow: 1;
+}
+
+aside {
+    font-family: "Lato", sans-serif;
+    font-size: 0.84rem;
+    align-self: center;
+    line-height: 1.4;
+    color: var(--date-color);
+    text-align: right;
+    margin-right: 1em;
+    text-wrap-mode: nowrap;
+}
+
+aside em {
+    font-size: 0.7rem;
+}
+
+p {
+    margin-bottom: 1em;
+}
+
+ul {
+    list-style: custom;
+}
+
+ul li::marker {
+    color: var(--accent-color);
+}
+
+ol li::marker {
+    color: var(--header-font-color);
+}
+
+li li::marker {
+    color: var(--date-color);
+}
+
+ul {
+    margin-bottom: 1em;
+}
+
+ul ul,
+ol ol {
+    margin-bottom: 0;
+    padding-left: 1em;
+}
+
+li p {
+    margin-bottom: 0;
+}
+
+li {
+    padding-left: 0.3em;
+    margin-left: 1em;
+    margin-bottom: 0.5em;
+}
+
+table {
+    margin-bottom: 1.5em;
+    border-collapse: collapse;
+    width: 95%;
+}
+
+table tr + tr {
+    border-top: 1px solid #ccc;
+}
+table td + td {
+    border-left: 1px solid #ccc;
+}
+
+table td {
+    padding: 0.4em;
+    text-align: center;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+table th {
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 95%;
+    padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+    line-height: 1.05;
+}
+
+img {
+    width: 100%;
+}
+
+a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+div.nav a:active div {
+    background: #cacaca;
+}
+
+a:active {
+    color: var(--header-font-color);
+}
+
+a:hover {
+    background: var(--code-background-color);
+}
+
+.post-link a:hover {
+    color: var(--date-color);
+}
+
+pre {
+    margin-left: var(--expanded-inset);
+    margin-right: var(--expanded-inset);
+    padding-left: 1.4em;
+    padding-top: 1em;
+    padding-bottom: 1em;
+    margin-bottom: 1em;
+    background-color: var(--code-background-color);
+    overflow: auto;
+    line-height: 1.5;
+    letter-spacing: -0.2pt;
+    border-left: 3.5px solid #bbb;
+    font-size: 85%;
+}
+
+code {
+    font-family: var(--code-font), monospace;
+    color: var(--pre-font-color);
+    display: inline-block;
+    max-width: 100%;
+    font-variant-ligatures: none;
+    text-rendering: auto;
+    -moz-font-feature-settings: "liga=0";
+    -moz-font-feature-settings: "liga" 0;
+    -webkit-font-feature-settings: "liga" 0;
+    -o-font-feature-settings: "liga" 0;
+    -ms-font-feature-settings: "liga" 0;
+    font-feature-settings: "liga" 0;
+}
+
+h1 > code,
+h2 > code,
+h3 > code,
+h4 > code,
+p > code {
+    display: inline-block;
+    text-transform: none;
+    padding-left: 0.1em;
+    padding-right: 0.1em;
+    font-size: 103%;
+    color: var(--pre-font-color);
+}
+
+figcaption {
+    font-weight: 400;
+    font-style: italic;
+    font-size: 0.7em/1.52;
+    line-height: 1.3;
+    color: #666665;
+    outline: 0;
+    z-index: 300;
+    text-align: center;
+}
+
+blockquote {
+    border-left: 3.5px solid var(--accent-color);
+    margin: 10px var(--expanded-inset);
+    padding: var(--default-inset) 20px;
+}
+
+blockquote p {
+    display: inline;
+}
+
+.content {
+    margin-bottom: 30px;
+}
+
+@media all {
+    html {
+        font-size: 18px;
+    }
+    .main {
+        margin-left: 7.5rem;
+        margin-right: 7.5rem;
+    }
+}
+@media all and (max-width: 1200px) {
+    pre {
+        margin-left: var(--default-inset);
+        margin-right: var(--default-inset);
+    }
+
+    blockquote {
+        margin: 0.7em var(--default-inset);
+    }
+}
+@media all and (max-width: 840px) {
+    h2,
+    h3 {
+        padding-left: var(--default-inset);
+        padding-right: var(--default-inset);
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    .post-link {
+        flex-direction: column-reverse;
+        justify-content: unset;
+    }
+
+    .post-link aside {
+        align-self: start;
+        text-align: left;
+    }
+
+    .title h1 {
+        text-align: center;
+    }
+
+    .main {
+        margin-left: 4rem;
+        margin-right: 4rem;
+    }
+}
+@media all and (max-width: 760px) {
+    .title h1 {
+        font-size: 24pt;
+    }
+
+    .main {
+        margin-left: 2.5rem;
+        margin-right: 2.5rem;
+    }
+}
+@media all and (max-width: 580px) {
+    .title h1 {
+        font-size: 20pt;
+    }
+
+    .tagline {
+        display: block;
+        font-size: 12px;
+    }
+
+    h2,
+    h3 {
+        --line-width: 4pt;
+        --inset: var(--default-inset);
+
+        margin-top: 0.4em;
+        padding-left: calc(var(--inset) - var(--line-width));
+    }
+
+    h2 .section-link,
+    h3 .section-link {
+        display: none;
+    }
+
+    h2 {
+        padding-top: 2pt;
+        font-size: 20pt;
+        padding-bottom: 2pt;
+    }
+
+    h3 {
+        font-size: 17pt;
+    }
+
+    aside.date-short {
+        display: none;
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    body,
+    li p {
+        line-height: 1.5;
+    }
+
+    header .separator {
+        visibility: collapse;
+    }
+
+    .main {
+        margin: 0 var(--default-inset);
+    }
+}
+</style></head><body><div class="main"><header><span class="blog-name"><a href="../index.html">troubles.md</a></span> <span class="tagline">Writing words and reading dwords</span></header><span></span><div class="content"><div class="title"><h1>WebAssembly Troubles part 3: What About Alloca?</h1><aside>30 January, 2019</aside></div><div class="post"><blockquote><h4>Preamble</h4><p>This is part 3 of a 4-part miniseries on issues with WebAssembly and proposals to fix them. <a href="/wasm-is-not-a-stack-machine">Part 1 here</a>, <a href="/why-do-we-need-the-relooper-algorithm-again">part 2 here</a>.<br><br>This article assumes some familiarity with virtual machines, compilers and WebAssembly, but I’ll try to link to relevant information where necessary so even if you’re not you can follow along.<br><br>Also, this series is going to come off as if I dislike WebAssembly. I love WebAssembly! I wrote a <a href="/why-wasm">whole article about how great it is</a>! In fact, I love it so much that I want it to be the best that it can be, and this series is me working through my complaints with the design in the hope that some or all of these issues can be addressed soon, while the ink is still somewhat wet on the specification.</p></blockquote><p>If you read my <a href="/wasm-is-not-a-stack-machine">first article in this series</a>, you’ll know that WebAssembly has both locals and the stack. I made the argument that locals are not just unnecessary, but are detrimental to the performance of WebAssembly in general, and that everything could be done with the stack alone. However, if you’re familiar with LLVM IR or other SSA IRs you might be familiar with an operator known as <code>alloca</code>, which circumvents SSA form to create an actual value on the stack. Why does LLVM need that escape hatch while I argue that WebAssembly does not?</p><p>Well, here’s a thought experiment for you: what WebAssembly does LLVM emit for the following Rust code?</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #ffbd5e">extern</span> { <span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">test</span>(<span style="color: #bd5eff">_</span>: <span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> <span style="color: #5ef1ff">u32</span>); }
+
+<span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">main</span>(){
+    <span style="color: #5ef1ff">let</span> <span style="color: #ff5ea0">mut</span> a <span style="color: #bd5eff">=</span> 0;
+    <span style="color: #ff5ea0">unsafe</span> { <span style="color: #5ea1ff">test</span>(<span style="color: #bd5eff">&amp;</span><span style="color: #ff5ea0">mut</span> a) };
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #d17c00">extern</span> { <span style="color: #008c99">fn</span> <span style="color: #0057d1">test</span>(<span style="color: #a018ff">_</span>: <span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> <span style="color: #008c99">u32</span>); }
+
+<span style="color: #008c99">fn</span> <span style="color: #0057d1">main</span>(){
+    <span style="color: #008c99">let</span> <span style="color: #f40064">mut</span> a <span style="color: #a018ff">=</span> 0;
+    <span style="color: #f40064">unsafe</span> { <span style="color: #0057d1">test</span>(<span style="color: #a018ff">&amp;</span><span style="color: #f40064">mut</span> a) };
+}
+</code></pre></div><p>In LLVM’s IR this is represented using <code>alloca</code>, which returns a pointer to the new stack value. In WebAssembly, however, you cannot create pointers to locals, so <code>alloca</code> has to be compiled another way. Let’s have a look at the emitted WebAssembly when compiled in release mode. I’ve simplified it by hand to make it clearer what’s going on.</p><div class="code-dark"><pre><code data-lang="lisp">(<span style="color: #5ea1ff">module</span>
+  (<span style="color: #5ea1ff">import</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">env</span><span style="color: #5eff6c">"</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">test</span><span style="color: #5eff6c">"</span> (<span style="color: #5ea1ff">func</span> $test (<span style="color: #5ea1ff">param</span> i32)))
+  (<span style="color: #5ea1ff">func</span> $main
+    (<span style="color: #5ea1ff">local</span> $local_sp i32)
+    (<span style="color: #5ea1ff">global.set</span> $stack_ptr
+      (<span style="color: #5ea1ff">local.tee</span> $local_sp
+        (<span style="color: #5ea1ff">i32.sub</span>
+          (<span style="color: #5ea1ff">global.get</span> $stack_ptr)
+          (<span style="color: #5ea1ff">i32.const</span> 16))))
+    (<span style="color: #5ea1ff">i32.store</span> offset=12
+      (<span style="color: #5ea1ff">local.get</span> $local_sp)
+      (<span style="color: #5ea1ff">i32.const</span> 0))
+    (<span style="color: #5ea1ff">call</span> $test
+      (<span style="color: #5ea1ff">i32.add</span>
+        (<span style="color: #5ea1ff">local.get</span> $local_sp)
+        (<span style="color: #5ea1ff">i32.const</span> 12)))
+    (<span style="color: #5ea1ff">global.set</span> $stack_ptr
+      (<span style="color: #5ea1ff">i32.add</span>
+        (<span style="color: #5ea1ff">local.get</span> $local_sp)
+        (<span style="color: #5ea1ff">i32.const</span> 16))))
+  (<span style="color: #5ea1ff">memory</span> $memory (<span style="color: #5ea1ff">export</span> <span style="color: #5eff6c">"</span><span style="color: #5eff6c">memory</span><span style="color: #5eff6c">"</span>) 17)
+  (<span style="color: #5ea1ff">global</span> $stack_ptr (<span style="color: #5ea1ff">mut</span> i32) (<span style="color: #5ea1ff">i32.const</span> 1048576)))
+</code></pre></div><div class="code-light"><pre><code data-lang="lisp">(<span style="color: #0057d1">module</span>
+  (<span style="color: #0057d1">import</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">env</span><span style="color: #008b0c">"</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">test</span><span style="color: #008b0c">"</span> (<span style="color: #0057d1">func</span> $test (<span style="color: #0057d1">param</span> i32)))
+  (<span style="color: #0057d1">func</span> $main
+    (<span style="color: #0057d1">local</span> $local_sp i32)
+    (<span style="color: #0057d1">global.set</span> $stack_ptr
+      (<span style="color: #0057d1">local.tee</span> $local_sp
+        (<span style="color: #0057d1">i32.sub</span>
+          (<span style="color: #0057d1">global.get</span> $stack_ptr)
+          (<span style="color: #0057d1">i32.const</span> 16))))
+    (<span style="color: #0057d1">i32.store</span> offset=12
+      (<span style="color: #0057d1">local.get</span> $local_sp)
+      (<span style="color: #0057d1">i32.const</span> 0))
+    (<span style="color: #0057d1">call</span> $test
+      (<span style="color: #0057d1">i32.add</span>
+        (<span style="color: #0057d1">local.get</span> $local_sp)
+        (<span style="color: #0057d1">i32.const</span> 12)))
+    (<span style="color: #0057d1">global.set</span> $stack_ptr
+      (<span style="color: #0057d1">i32.add</span>
+        (<span style="color: #0057d1">local.get</span> $local_sp)
+        (<span style="color: #0057d1">i32.const</span> 16))))
+  (<span style="color: #0057d1">memory</span> $memory (<span style="color: #0057d1">export</span> <span style="color: #008b0c">"</span><span style="color: #008b0c">memory</span><span style="color: #008b0c">"</span>) 17)
+  (<span style="color: #0057d1">global</span> $stack_ptr (<span style="color: #0057d1">mut</span> i32) (<span style="color: #0057d1">i32.const</span> 1048576)))
+</code></pre></div><p>Gross. LLVM generates a mutable global (similar to <code>static mut</code> in Rust) which it then does arithmetic manually on to manipulate the stack. Accessing the stack is suppposed to be extremely fast, and in fact if you compile the Rust code directly to native it looks something like this:</p><div class="code-dark"><pre><code data-lang="gas">main:
+    push rax
+    mov  dword ptr [rsp + 4], 0
+    lea  rdi,                 [rsp + 4]
+    call qword ptr [rip + test@GOTPCREL]
+    pop  rax
+    ret
+</code></pre></div><div class="code-light"><pre><code data-lang="gas">main:
+    push rax
+    mov  dword ptr [rsp + 4], 0
+    lea  rdi,                 [rsp + 4]
+    call qword ptr [rip + test@GOTPCREL]
+    pop  rax
+    ret
+</code></pre></div><p>The <code>push</code> and <code>pop</code> are to reserve space on the stack, it’s better if you need to reserve &lt;8 bytes to use <code>push</code> and <code>pop</code> instead of doing arithmetic on the stack pointer yourself. Contrast this assembly output with the assembly generated by firefox for the above Wasm (simplified):</p><div class="code-dark"><pre><code data-lang="gas">main:
+  sub rsp,                         0x28
+  cmp [r14 + 0x28],                rsp
+  ; .Lstack-overflow is defined elsewhere
+  jae .Lstack-overflow 
+
+  mov edi,                         [r14 + 0x50]
+  mov eax,                         edi
+  sub eax,                         0x10
+  mov [rsp + 0x1c],                eax
+  mov [r14 + 0x50],                eax
+  mov [r15 + rax + 0xc],           0
+  add edi,                         -4
+  mov [rsp],                       r14
+  mov rax,                         [r14 + 0x30]
+  mov r14,                         [r14 + 0x38]
+  mov r15,                         [r14 + 0x18]
+  call rax
+  mov r14,                         [rsp]
+  mov r15,                         [r14 + 0x18]
+  mov eax,                         [rsp + 0x1c]
+  add eax,                         0x10
+  mov [r14 + 0x50],                eax
+  nop
+  add rsp,                         0x28
+  ret
+</code></pre></div><div class="code-light"><pre><code data-lang="gas">main:
+  sub rsp,                         0x28
+  cmp [r14 + 0x28],                rsp
+  ; .Lstack-overflow is defined elsewhere
+  jae .Lstack-overflow 
+
+  mov edi,                         [r14 + 0x50]
+  mov eax,                         edi
+  sub eax,                         0x10
+  mov [rsp + 0x1c],                eax
+  mov [r14 + 0x50],                eax
+  mov [r15 + rax + 0xc],           0
+  add edi,                         -4
+  mov [rsp],                       r14
+  mov rax,                         [r14 + 0x30]
+  mov r14,                         [r14 + 0x38]
+  mov r15,                         [r14 + 0x18]
+  call rax
+  mov r14,                         [rsp]
+  mov r15,                         [r14 + 0x18]
+  mov eax,                         [rsp + 0x1c]
+  add eax,                         0x10
+  mov [r14 + 0x50],                eax
+  nop
+  add rsp,                         0x28
+  ret
+</code></pre></div><p>Some of this is important for WebAssembly’s sandboxing, but I hope you can see that the “stack_ptr” global is being loaded and stored to memory every time. This isn’t the baseline compiler, this is Firefox’s optimising compiler, and as far as I can tell at the time of writing Firefox’s output for WebAssembly is the fastest of any browser. “So”, you ask, “why not just reserve a register for this global variable?”. Well I’m glad you asked, straw man in my head. Although it wouldn’t solve every problem, having the stack pointer be stored in a global variable would improve performance significantly and allow for much better code. It still couldn’t match native, but it would get a lot closer.</p><p>The issue is that the global used for the stack pointer isn’t marked. The Wasm->native compiler doesn’t know that <code>stack_ptr</code> is the stack pointer and so will be hot enough to store in a register. We’ve got a few ways to solve this, and I’ll give my take on the pros and cons of each.</p><h3 id="webassembly-troubles-part-3-what-about-alloca-separate-stack-and-heap"><span class="section-link"><a href="#webassembly-troubles-part-3-what-about-alloca-separate-stack-and-heap"><span>§</span></a></span> <span class="section-title">Separate stack and heap</span> <span class="section-link-postfix"><a href="#webassembly-troubles-part-3-what-about-alloca-separate-stack-and-heap">§</a></span></h3><p>The first possibility is to have each function declare a set of stack variables and allow it to construct pointers to them. Unfortunately, this is a total non-starter. Currently pointers in Wasm are just a <code>u32</code> (Wasm has one type for both signed and unsigned integers so you’ll see it referred to as <code>i32</code> in the spec), which means that arbitrary arithmetic can be performed on them. If you want the stack pointers to refer to the “physical stack” (the area of memory around <code>rsp</code>, like LLVM generates when generating native code) you’re out of luck since a malicious Wasm module could just manipulate a stack pointer and overwrite the return address. PNaCl implements this method and prevents the return address from being manipulated by masking the return address when the function returns, which ensures that you can only jump to known-safe addresses. Unfortunately, manipulating the return address like this means that every single function call results in a pipeline stall since the CPU can’t start speculatively executing the return value.</p><p>That’s not the only problem though. Currently, the Wasm heap is untyped, which is very important for efficient compilation of languages like C and Rust that rely on viewing the heap as a blob of bytes. Heap pointers are just indices into a blob of memory. If the heap and stack were separate, there would be no good way to compile this code:</p><div class="code-dark"><pre><code data-lang="rust"><span style="color: #5ef1ff">fn</span> <span style="color: #5ea1ff">main</span>() {
+    <span style="color: #5ef1ff">let</span> foo <span style="color: #bd5eff">=</span> <span style="color: #bd5eff">Box</span><span style="color: #ff5ea0">::</span>new(0);
+    <span style="color: #5ef1ff">let</span> bar <span style="color: #bd5eff">=</span> 1;
+
+    <span style="color: #5ef1ff">let</span> some_vec <span style="color: #bd5eff">=</span> vec![<span style="color: #bd5eff">&amp;</span><span style="color: #bd5eff">*</span>foo, <span style="color: #bd5eff">&amp;</span>bar];
+}
+</code></pre></div><div class="code-light"><pre><code data-lang="rust"><span style="color: #008c99">fn</span> <span style="color: #0057d1">main</span>() {
+    <span style="color: #008c99">let</span> foo <span style="color: #a018ff">=</span> <span style="color: #a018ff">Box</span><span style="color: #f40064">::</span>new(0);
+    <span style="color: #008c99">let</span> bar <span style="color: #a018ff">=</span> 1;
+
+    <span style="color: #008c99">let</span> some_vec <span style="color: #a018ff">=</span> vec![<span style="color: #a018ff">&amp;</span><span style="color: #a018ff">*</span>foo, <span style="color: #a018ff">&amp;</span>bar];
+}
+</code></pre></div><p>Here we’re storing one heap pointer and one stack pointer in an array which is itself stored on the heap. Separated stack and heap pointers means that this is impossible - you either need the heap to be typed or you need to allow manipulating the pointer to the stack value, which could cause the wasm to overwrite memory that it shouldn’t have access to.</p><h3 id="webassembly-troubles-part-3-what-about-alloca-explicit-stack-pointer"><span class="section-link"><a href="#webassembly-troubles-part-3-what-about-alloca-explicit-stack-pointer"><span>§</span></a></span> <span class="section-title">Explicit stack pointer</span> <span class="section-link-postfix"><a href="#webassembly-troubles-part-3-what-about-alloca-explicit-stack-pointer">§</a></span></h3><p>The second possibility - which I believe has been suggested before although I can’t find the issue where it was mentioned - is to explicitly mark one or more globals as “hot”, which can act as a hint to the compiler that a register should be reserved for this global. The stack pointer can then be marked as “hot” and WebAssembly runtimes that don’t care about maximising performance (like the spec interpreter or <a href="https://github.com/paritytech/wasmi">wasmi</a>) can ignore it. The biggest downside to this scheme is that it uses up one more register that could have been used for intermediate results. If your compiler has decent instruction choice then codegen with this scheme should look relatively similar to the native code generated by LLVM. Unlike more complicated optimisations, I would consider implementing a good instruction choice algorithm to be the main job of a compiler from WebAssembly to native, so it wouldn’t require extra, stack pointer-specific work in order to get this to compile to good code - work done improving codegen for this case will improve codegen everywhere.</p><p>Personally, I believe that the second option is the best.</p><h3 id="webassembly-troubles-part-3-what-about-alloca-why-isn-t-this-implemented-already"><span class="section-link"><a href="#webassembly-troubles-part-3-what-about-alloca-why-isn-t-this-implemented-already"><span>§</span></a></span> <span class="section-title">Why isn’t this implemented already?</span> <span class="section-link-postfix"><a href="#webassembly-troubles-part-3-what-about-alloca-why-isn-t-this-implemented-already">§</a></span></h3><p>Unlike the past two articles, this is pretty clearly not a fundamental design issue that should have be fixed for the MVP. This can easily be added in a backwards-compatible way - existing code can’t take advantage of this optimisation but any new code will be able to. Hopefully this article gave you some insight into why the stack isn’t quite as optimised as it should be in contemporary WebAssembly runtimes.</p><p>Join me next time where I finally inject some positivity into this series, and propose a medium-term solution to these issues and more. I won’t even have to fight Google on this one.</p></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>

@@ -1,146 +1,687 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine</title>
-    
-    <meta name="description" content="">
-    
-    <meta itemprop="name" content="WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine">
-    
-    
-    <meta name="og:title" content="WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine">
-    
-        <meta name="image" content="http://troubles.md/floppies.png">
-        <meta name="og:image" content="http://troubles.md/floppies.png">
-       <meta name="og:url" content="http://troubles.md/wasm-is-not-a-stack-machine/">
-    <meta name="og:site_name" content="WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine">
-    <meta name="og:type" content="article">
-    
-    <meta name="article:tag" content="">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/style.css">
-    <link rel="stylesheet" type="text/css" href="http://troubles.md/css/syntax.css">
-    <script async>
-        window.onload = function() {
-            var possibilities = [
-                 "A high-level view of low-level code",  "Writing words and reading DWORDS", 
-            ];
+<!DOCTYPE html><html><head><meta name="og:type" content="article"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="og:title" content="WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine"><meta itemprop="name" content="WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine"><meta name="image" content="floppies.png"><meta name="og:image" content="floppies.png"><title>WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine - troubles.md</title><style rel="stylesheet" type="text/css">@import url("https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square");
 
-            document.getElementById('subtitle').innerHTML = possibilities[Math.floor(possibilities.length * Math.random())];
-        };
-    </script>
-</head>
+/* Light theme by default */
+:root {
+    --main-header-font: "Bevan", monospace;
+    --secondary-header-font: "Sanchez", monospace;
+    --body-font: "Lato", sans-serif;
+    --code-font: "Cascadia Mono", monospace;
+    --default-inset: 11pt;
+    --expanded-inset: 20pt;
+    --title-inset: 28pt;
+    --background-color: #fff;
+    --header-font-color: #777;
+    --font-color: #000;
+    --pre-font-color: #333;
+    --date-color: #667;
+    --code-background-color: #f7f7f7;
+    --accent-color: #0594cb;
+}
 
-<body>
+@counter-style custom {
+    system: cyclic;
+    symbols: "┃";
+    suffix: " ";
+}
 
-<header>
-    
-    <span>
-        <a href="http://troubles.md/" class="title"><strong>troubles.md</strong></a>
-        <span class="dash"> - </span><p id="subtitle" class="subtitle">A high-level view of low-level code</p>
-        
-        
-    </span>
-    
-    <a class="rss" href="http://troubles.md/index.xml">
-        <strong>
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="feather feather-rss"
-            >
-                <path d="M4 11a9 9 0 0 1 9 9">
-                </path>
-                <path d="M4 4a16 16 0 0 1 16 16">
-                </path>
-                <circle cx="5" cy="19" r="1">
-                </circle>
-            </svg>
-        </strong>
-    </a>
-</header>
+.code-dark {
+    display: none;
+}
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #252525;
+        --header-font-color: #aaa;
+        --font-color: #eee;
+        --pre-font-color: #bababa;
+        --date-color: #999;
+        --code-background-color: #333;
+    }
 
-<div class="content">
-  <h1>WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine <aside></aside></h1>
-  <blockquote>
-<h3 id="preamble">Preamble</h3>
-<p>This is part 1 of a 4-part miniseries on issues with WebAssembly and proposals to fix them. <a href="http://troubles.md/why-do-we-need-the-relooper-algorithm-again/">Part 2 here</a>, <a href="http://troubles.md/the-stack-is-not-the-stack/">part 3 here</a>, <a href="http://troubles.md/microwasm/">part 4 here</a>.
-<!-- raw HTML omitted --><!-- raw HTML omitted -->
-This article assumes some familiarity with virtual machines, compilers and WebAssembly, but I&rsquo;ll try to link to relevant information where necessary so even if you&rsquo;re not you can follow along.
-<!-- raw HTML omitted --><!-- raw HTML omitted -->
-Also, this series is going to come off as if I dislike WebAssembly. I love WebAssembly! I wrote a <a href="http://troubles.md/why-wasm/">whole article about how great it is</a>! In fact, I love it so much that I want it to be the best that it can be, and this series is me working through my complaints with the design in the hope that some or all of these issues can be addressed soon, while the ink is still somewhat wet on the specification.</p>
-</blockquote>
-<p>I&rsquo;m sure you&rsquo;re all familiar with WebAssembly by now. It&rsquo;s seeing use everywhere, from plugins to blockchain smart contracts to, of course, the web. If you go to the Wikipedia article for WebAssembly right now, you&rsquo;ll get a great overview of the technology, except for one thing: the &ldquo;Design&rdquo; section states:</p>
-<blockquote>
-<p>WebAssembly code is intended to be run on a portable abstract structured stack machine</p>
-</blockquote>
-<p>Nope.</p>
-<h2 id="stack-machines-vs-register-machines">Stack machines vs register machines</h2>
-<p>The difference between a stack and a register machine is essentially this: a stack machine pops values from and pushed values onto a stack, so for example a <code>+</code> operation will pop the last two values off of the stack, add them together, and then push the result back onto the stack. A register machine has some number of places where values can be stored, and operations reads and writes to those registers. So <code>+</code> will take 3 arguments, 2 that represent the registers to read the operands from and 1 that represents the register to write the result to<sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>.</p>
-<p>The problem with registers is that there is no liveness analysis. If you have some code like so:</p>
-<pre><code>%0 = 1
+    footer img {
+        filter: invert();
+    }
+
+    .code-dark {
+        display: block;
+    }
+
+    .code-light {
+        display: none;
+    }
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--font-color);
+}
+
+body,
+li p {
+    font-family: var(--body-font), sans-serif;
+    letter-spacing: 0.15pt;
+    word-spacing: 0.08pt;
+    line-height: 1.8;
+}
+
+h2,
+h3 {
+    --line-width: 9pt;
+    --inset: var(--title-inset);
+
+    display: flex;
+    flex-direction: row;
+    background-color: var(--code-background-color);
+    border-left: var(--line-width) solid var(--accent-color);
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+    padding-left: calc(var(--inset) - var(--line-width));
+    padding-right: 0.6rem;
+    padding-bottom: 0.2rem;
+    margin-top: 2.1rem;
+    margin-bottom: 0.4rem;
+}
+
+h2 span,
+h3 span {
+    display: none;
+}
+
+h2 .section-title,
+h3 .section-title {
+    display: inline-block;
+}
+
+.section-link-postfix {
+    display: flex;
+
+    flex-direction: column;
+    justify-content: space-around;
+
+    font-family: var(--body-font);
+    font-size: 90%;
+    padding-left: 12pt;
+    margin-left: auto;
+}
+
+.section-link-postfix a {
+    opacity: 0.7;
+    color: var(--header-font-color);
+}
+
+h2 a span,
+h3 a span {
+    font-size: 18px;
+    color: var(--code-background-color);
+}
+
+h2 a span {
+    padding-top: 0.5rem;
+}
+
+h3 a span {
+    padding-top: 0.1rem;
+}
+
+h2 .section-link a:hover,
+h3 .section-link a:hover {
+    background-color: var(--accent-color);
+}
+
+h2 .section-link a:hover span,
+h3 .section-link a:hover span {
+    display: block;
+}
+
+a .section-link {
+    font-size: calc(100% * var(--font-perc));
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--secondary-header-font), serif;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+}
+
+a code {
+    color: var(--accent-color);
+}
+
+h1 {
+    font-family: var(--main-header-font), serif;
+    font-weight: normal;
+    letter-spacing: 1pt;
+    display: block;
+    font-size: 250%;
+    line-height: 1.2;
+    padding-top: 0.02em;
+    margin-top: 1em;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+h2 {
+    font-size: 170%;
+}
+
+h3 {
+    font-size: 120%;
+}
+
+.post-link {
+    margin-bottom: 1em;
+}
+
+.post-link a {
+    font-family: var(--secondary-header-font);
+    color: var(--font-color);
+}
+
+header .blog-name a {
+    font-family: "Nova Square";
+    font-size: 130%;
+    letter-spacing: 3pt;
+    color: var(--font-color);
+    border-right: 3px solid var(--accent-color);
+}
+
+@keyframes blink-cursor {
+    50% {
+        border-right: unset;
+    }
+}
+
+header .blog-name a:hover {
+    animation: blink-cursor 1s linear infinite;
+}
+
+header,
+header a {
+    color: var(--header-font-color);
+    text-decoration: none;
+}
+
+/* reset */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    height: 100%;
+}
+
+li:target {
+    background-color: var(--code-background-color);
+}
+
+body {
+    padding: 0rem 0em 0rem 0em;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "kern=1";
+    -moz-font-feature-settings: "kern" 1;
+    -webkit-font-feature-settings: "kern" 1;
+    -o-font-feature-settings: "kern" 1;
+    -ms-font-feature-settings: "kern" 1;
+    font-feature-settings: "kern" 1;
+
+    text-rendering: optimizeLegibility;
+    -moz-font-feature-settings: "liga=1";
+    -moz-font-feature-settings: "liga" 1;
+    -webkit-font-feature-settings: "liga" 1;
+    -o-font-feature-settings: "liga" 1;
+    -ms-font-feature-settings: "liga" 1;
+    font-feature-settings: "liga" 1;
+}
+
+.spon {
+    width: 100%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 14px;
+    background-color: rgb(243, 243, 165);
+    border-left: 3px solid var(--font-color);
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    padding-left: 12px;
+    padding-top: 5px;
+}
+
+.attribution {
+    display: block;
+    font-size: 18px;
+    font-family: "Montserrat", sans-serif;
+    width: 100%;
+    line-height: 1.8;
+    margin-top: 5px;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+header {
+    --inset: var(--title-inset);
+
+    font-family: "Cascadia Mono";
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.2;
+    justify-content: space-between;
+    /*background-color: var(--code-background-color);*/
+    display: flex;
+    letter-spacing: 0.7pt;
+    align-items: center;
+    padding: 0.5rem var(--inset);
+    border-bottom: 0.1em solid var(--header-font-color);
+    margin-bottom: 1.5rem;
+    margin-left: calc(-1 * var(--inset));
+    margin-right: calc(-1 * var(--inset));
+}
+
+header a:hover {
+    color: var(--header-font-color);
+}
+
+.blog-name {
+    font-weight: 900;
+    justify-self: start;
+}
+
+.tagline {
+    justify-self: end;
+    font-weight: 100;
+}
+
+.blog-name,
+.tagline {
+    margin-bottom: 0px;
+    text-decoration: none;
+}
+
+footer {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 180px;
+}
+
+footer img {
+    width: 30px;
+    height: 30px;
+}
+
+.footnotes li p {
+    display: inline;
+}
+
+.ft-return-link {
+    display: inline;
+    margin-left: 0.5em;
+}
+
+.title {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.title aside {
+    width: 100%;
+    text-align: right;
+}
+
+.post-link:first-of-type {
+    margin-top: 1rem;
+}
+
+.post-link {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.post-link aside {
+    min-width: 152px;
+}
+
+.post-link a {
+    padding-left: var(--default-inset);
+    margin-left: calc(-1 * var(--default-inset));
+    line-height: 1.6;
+    padding-right: 1.5rem;
+    flex-grow: 1;
+}
+
+aside {
+    font-family: "Lato", sans-serif;
+    font-size: 0.84rem;
+    align-self: center;
+    line-height: 1.4;
+    color: var(--date-color);
+    text-align: right;
+    margin-right: 1em;
+    text-wrap-mode: nowrap;
+}
+
+aside em {
+    font-size: 0.7rem;
+}
+
+p {
+    margin-bottom: 1em;
+}
+
+ul {
+    list-style: custom;
+}
+
+ul li::marker {
+    color: var(--accent-color);
+}
+
+ol li::marker {
+    color: var(--header-font-color);
+}
+
+li li::marker {
+    color: var(--date-color);
+}
+
+ul {
+    margin-bottom: 1em;
+}
+
+ul ul,
+ol ol {
+    margin-bottom: 0;
+    padding-left: 1em;
+}
+
+li p {
+    margin-bottom: 0;
+}
+
+li {
+    padding-left: 0.3em;
+    margin-left: 1em;
+    margin-bottom: 0.5em;
+}
+
+table {
+    margin-bottom: 1.5em;
+    border-collapse: collapse;
+    width: 95%;
+}
+
+table tr + tr {
+    border-top: 1px solid #ccc;
+}
+table td + td {
+    border-left: 1px solid #ccc;
+}
+
+table td {
+    padding: 0.4em;
+    text-align: center;
+    -moz-hyphens: none;
+    -webkit-hyphens: none;
+    -o-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+}
+
+table th {
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 95%;
+    padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+    line-height: 1.05;
+}
+
+img {
+    width: 100%;
+}
+
+a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+div.nav a:active div {
+    background: #cacaca;
+}
+
+a:active {
+    color: var(--header-font-color);
+}
+
+a:hover {
+    background: var(--code-background-color);
+}
+
+.post-link a:hover {
+    color: var(--date-color);
+}
+
+pre {
+    margin-left: var(--expanded-inset);
+    margin-right: var(--expanded-inset);
+    padding-left: 1.4em;
+    padding-top: 1em;
+    padding-bottom: 1em;
+    margin-bottom: 1em;
+    background-color: var(--code-background-color);
+    overflow: auto;
+    line-height: 1.5;
+    letter-spacing: -0.2pt;
+    border-left: 3.5px solid #bbb;
+    font-size: 85%;
+}
+
+code {
+    font-family: var(--code-font), monospace;
+    color: var(--pre-font-color);
+    display: inline-block;
+    max-width: 100%;
+    font-variant-ligatures: none;
+    text-rendering: auto;
+    -moz-font-feature-settings: "liga=0";
+    -moz-font-feature-settings: "liga" 0;
+    -webkit-font-feature-settings: "liga" 0;
+    -o-font-feature-settings: "liga" 0;
+    -ms-font-feature-settings: "liga" 0;
+    font-feature-settings: "liga" 0;
+}
+
+h1 > code,
+h2 > code,
+h3 > code,
+h4 > code,
+p > code {
+    display: inline-block;
+    text-transform: none;
+    padding-left: 0.1em;
+    padding-right: 0.1em;
+    font-size: 103%;
+    color: var(--pre-font-color);
+}
+
+figcaption {
+    font-weight: 400;
+    font-style: italic;
+    font-size: 0.7em/1.52;
+    line-height: 1.3;
+    color: #666665;
+    outline: 0;
+    z-index: 300;
+    text-align: center;
+}
+
+blockquote {
+    border-left: 3.5px solid var(--accent-color);
+    margin: 10px var(--expanded-inset);
+    padding: var(--default-inset) 20px;
+}
+
+blockquote p {
+    display: inline;
+}
+
+.content {
+    margin-bottom: 30px;
+}
+
+@media all {
+    html {
+        font-size: 18px;
+    }
+    .main {
+        margin-left: 7.5rem;
+        margin-right: 7.5rem;
+    }
+}
+@media all and (max-width: 1200px) {
+    pre {
+        margin-left: var(--default-inset);
+        margin-right: var(--default-inset);
+    }
+
+    blockquote {
+        margin: 0.7em var(--default-inset);
+    }
+}
+@media all and (max-width: 840px) {
+    h2,
+    h3 {
+        padding-left: var(--default-inset);
+        padding-right: var(--default-inset);
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    .post-link {
+        flex-direction: column-reverse;
+        justify-content: unset;
+    }
+
+    .post-link aside {
+        align-self: start;
+        text-align: left;
+    }
+
+    .title h1 {
+        text-align: center;
+    }
+
+    .main {
+        margin-left: 4rem;
+        margin-right: 4rem;
+    }
+}
+@media all and (max-width: 760px) {
+    .title h1 {
+        font-size: 24pt;
+    }
+
+    .main {
+        margin-left: 2.5rem;
+        margin-right: 2.5rem;
+    }
+}
+@media all and (max-width: 580px) {
+    .title h1 {
+        font-size: 20pt;
+    }
+
+    .tagline {
+        display: block;
+        font-size: 12px;
+    }
+
+    h2,
+    h3 {
+        --line-width: 4pt;
+        --inset: var(--default-inset);
+
+        margin-top: 0.4em;
+        padding-left: calc(var(--inset) - var(--line-width));
+    }
+
+    h2 .section-link,
+    h3 .section-link {
+        display: none;
+    }
+
+    h2 {
+        padding-top: 2pt;
+        font-size: 20pt;
+        padding-bottom: 2pt;
+    }
+
+    h3 {
+        font-size: 17pt;
+    }
+
+    aside.date-short {
+        display: none;
+    }
+
+    html {
+        font-size: 17px;
+    }
+
+    body,
+    li p {
+        line-height: 1.5;
+    }
+
+    header .separator {
+        visibility: collapse;
+    }
+
+    .main {
+        margin: 0 var(--default-inset);
+    }
+}
+</style></head><body><div class="main"><header><span class="blog-name"><a href="../index.html">troubles.md</a></span> <span class="tagline">Writing words and reading dwords</span></header><span></span><div class="content"><div class="title"><h1>WebAssembly Troubles part 1: WebAssembly Is Not a Stack Machine</h1><aside>28 January, 2019</aside></div><div class="post"><blockquote><h4>Preamble</h4><p>This is part 1 of a 4-part miniseries on issues with WebAssembly and proposals to fix them.<br><br>This article assumes some familiarity with virtual machines, compilers and WebAssembly, but I’ll try to link to relevant information where necessary so even if you’re not you can follow along.<br><br>Also, this series is going to come off as if I dislike WebAssembly. I love WebAssembly! I wrote a <a href="/why-wasm">whole article about how great it is</a>! In fact, I love it so much that I want it to be the best that it can be, and this series is me working through my complaints with the design in the hope that some or all of these issues can be addressed soon, while the ink is still somewhat wet on the specification.</p></blockquote><p>I’m sure you’re all familiar with WebAssembly by now. It’s seeing use everywhere, from plugins to blockchain smart contracts to, of course, the web. If you go to the Wikipedia article for WebAssembly right now, you’ll get a great overview of the technology, except for one thing: the “Design” section states:</p><blockquote><p>WebAssembly code is intended to be run on a portable abstract structured stack machine</p></blockquote><p>Nope.</p><h3 id="webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-stack-machines-vs-register-machines"><span class="section-link"><a href="#webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-stack-machines-vs-register-machines"><span>§</span></a></span> <span class="section-title">Stack machines vs register machines</span> <span class="section-link-postfix"><a href="#webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-stack-machines-vs-register-machines">§</a></span></h3><p>The difference between a stack and a register machine is essentially this: a stack machine pops values from and pushed values onto a stack, so for example a <code>+</code> operation will pop the last two values off of the stack, add them together, and then push the result back onto the stack. A register machine has some number of places where values can be stored, and operations reads and writes to those registers. So <code>+</code> will take 3 arguments, 2 that represent the registers to read the operands from and 1 that represents the register to write the result to <a id="ft-ref-2-1" href="#ft-note-2-1"><sup>1</sup></a> .</p><p>The problem with registers is that there is no liveness analysis. If you have some code like so:</p><div class="code-dark"><pre><code>%0 = 1
 %1 = 2
 %2 = add %0, %1
 ...
-</code></pre><p>Are <code>%0</code> and <code>%1</code> used after the addition? Without lookahead, you have no way of knowing. Even in SSA<sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup> register machines like LLVM IR (where each register is written to exactly once) the liveness of each register must be continuously recalculated. This means that you have overhead associated with compilation - knowing the liveness of variables is extremely important for generating efficient assembly, but instead of the liveness being calculated when creating the IR and stored as a part of it you have to recalculate this data every time.</p>
-<p>If the IR is entirely in-memory this isn&rsquo;t so bad, especially if your code is in SSA form, but it means that you have to do extra work for the same quality of code and it means that a streaming compiler (like FireFox&rsquo;s Wasm baseline compiler) is unable to produce good code.</p>
-<p>You can, of course, add liveness analysis metadata to the machine, but that liveness analysis is only useful if your code is in SSA form - if it&rsquo;s not SSA form then the liveness is <em>extremely</em> coarse-grained.</p>
-<p>Well, that&rsquo;s where WebAssembly comes in. See, WebAssembly has these things called locals. Locals are mutable variables that live for the lifetime of a function. Since WebAssembly blocks can&rsquo;t take arguments, they&rsquo;re the only way for blocks to receive data from outside. This includes stuff like loop counters, the classic example for SSA-defeating mutable variables, but it also includes regular blocks. For example:</p>
-<div class="highlight"><pre class="chroma"><code class="language-lisp" data-lang="lisp"><span class="p">(</span><span class="nv">func</span> <span class="p">(</span><span class="nv">result</span> <span class="nv">i32</span><span class="p">)</span>
-  <span class="p">(</span><span class="nv">add</span> <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">1</span><span class="p">)</span> <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">2</span><span class="p">))</span>
-  <span class="p">(</span><span class="k">block</span> <span class="p">(</span><span class="nv">result</span> <span class="nv">i32</span><span class="p">)</span>
-    <span class="c1">; Can&#39;t read the result of the add above</span>
-  <span class="p">))</span>
-</code></pre></div><p>You have to do this:</p>
-<div class="highlight"><pre class="chroma"><code class="language-lisp" data-lang="lisp"><span class="p">(</span><span class="nv">func</span> <span class="p">(</span><span class="nv">result</span> <span class="nv">i32</span><span class="p">)</span>
-  <span class="p">(</span><span class="nv">local</span> <span class="nv">i32</span><span class="p">)</span>
-  <span class="p">(</span><span class="nv">local.set</span> <span class="mi">0</span> <span class="p">(</span><span class="nv">add</span> <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">1</span><span class="p">)</span> <span class="p">(</span><span class="nv">i32.const</span> <span class="mi">2</span><span class="p">)))</span>
-  <span class="p">(</span><span class="k">block</span> <span class="p">(</span><span class="nv">result</span> <span class="nv">i32</span><span class="p">)</span>
-    <span class="p">(</span><span class="nv">local.get</span> <span class="mi">0</span><span class="p">)</span>
-  <span class="p">))</span>
-</code></pre></div><p>This is a problem. Usually a stack machine can be trivially converted to SSA form with liveness analysis - an item on the stack is dead when it is used as the argument to an operator - no ifs, no buts. Even a <code>pick</code> operator<sup id="fnref:3"><a href="#fn:3" class="footnote-ref" role="doc-noteref">3</a></sup> can be thought of in these terms as long as the argument to <code>pick</code> is a compile-time constant, although generally the SSA conversion of a stack machine that includes a <code>pick</code> instruction would be implemented using refcounting - meaning that reading a variable doesn&rsquo;t involve creating an unnecessary new one. However, locals are a problem. They&rsquo;re mutable, so you can&rsquo;t trivially convert them to SSA, and they always live for the lifetime of the function.</p>
-<p>This poses a problem for optimisation. SSA form is one of the most powerful optimisation tools. The fact that locals are mutable defeats that, and the fact that they&rsquo;re global to the function defeats liveness analysis. For an example of why this is an issue, say you&rsquo;re trying to compile WebAssembly into some native architecture. You&rsquo;ll compile your code into one that uses some number of arguments in registers, but now unless you do your own liveness analysis on that function those registers are permanently marked &ldquo;in use&rdquo; by those arguments. Without extra analysis you don&rsquo;t know when the last usage of that argument is, and so you can&rsquo;t ever reuse the register used by that argument for something else. Even a function that never uses any of its arguments still can&rsquo;t reuse the space used by those arguments for anything else.</p>
-<p>This essentially makes WebAssembly a register machine without liveness analysis, but not only that, it&rsquo;s a register machine that isn&rsquo;t even in SSA form - both of the tools at our disposal to do optimisation are unavailable. In a true, optimising compiler we can recreate that information, but WebAssembly was already emitted by a compiler that generated that information once. There&rsquo;s no technical reason why we should have to do that work again, it&rsquo;s just a deficiency in the language. A compiler that has to act on a stream of WebAssembly has less ability to recreate this information and will end up generating significantly worse code for essentially no good reason.</p>
-<h2 id="why">Why?</h2>
-<p>The developers of the WebAssembly spec aren&rsquo;t dumb. For the most part it&rsquo;s an extremely well-designed specification. However, they are weighed down by WebAssembly&rsquo;s legacy. WebAssembly started out not as a bytecode, but more like a simplified binary representation for asm.js. Essentially it was originally designed to be source code, like JavaScript. It would be a more-efficient representation thereof but it still wasn&rsquo;t a proper virtual machine instruction set. Then, it became a register machine<sup id="fnref:4"><a href="#fn:4" class="footnote-ref" role="doc-noteref">4</a></sup>, and only at the last minute did it switch to stack-based encoding for the operators. At that point, concepts like locals were quite entrenched in the spec. Not only that, but for the most part the WebAssembly specification team were flying blind. No streaming compiler had yet been built, hell, no compiler had yet been built. It wasn&rsquo;t clear that having locals would be problematic - after all, C gets by just fine using local variables that the compiler constructs the SSA graph for.</p>
-<p>It&rsquo;s only by working on a streaming WebAssembly compiler for integration with <a href="https://github.com/CraneStation/wasmtime">Wasmtime</a> that I realised these issues, as well as more issues that I&rsquo;ll get to in later articles in this series. Before then I considered WebAssembly&rsquo;s design to be utterly rock-solid, and in fact I still strongly believe that most of the decisions made were the right ones. Although it has problems, it&rsquo;s incredible how much the WebAssembly working group got right considering it was such relatively unknown territory at the time of the specification&rsquo;s writing.</p>
-<h2 id="whats-the-alternative">What&rsquo;s the alternative?</h2>
-<p>So currently locals represent both function arguments and local variables. There is <a href="https://github.com/WebAssembly/multi-value/blob/master/proposals/multi-value/Overview.md">a proposal to allow blocks to have arguments and both functions and blocks to return more than one value</a>. With this, it becomes possible to get rid of locals entirely. Loop counters are implemented by having the counter be given as an argument, and then when you jump to the header of the loop you must have the new value of the counter on the stack. This acts like a phi function but is much conceptually simpler. Since it&rsquo;s impossible to get the address of locals in WebAssembly there&rsquo;s no need for <code>alloca</code> in any form - unlike in LLVM, you don&rsquo;t need to have locals at all. The only thing left is to implement function arguments by having the function start with its arguments on the stack and you no longer need locals at all.</p>
-<p>This massively reduces the complexity of the WebAssembly specification and compilers for it without reducing the expressivity, and allows the compilers generating the WebAssembly to encode more of their knowledge about the original source into the WebAssembly itself. Although optimising compilers will probably not generate better code from this, they will become much simpler and easier to maintain, and streaming compilers will become significantly simpler and produce significantly better code.</p>
-<p>Finally, not only is a stack machine like this automatically in SSA form, but it&rsquo;s automatically in <em>strict</em> SSA form. This means that it is statically impossible to access undefined variables. In WebAssembly as it exists now, you have to zero locals when entering a function unless you can statically prove that the local is always set before it is accessed. Again, the compilers almost always have this information, and removing locals makes accessing undefined memory statically impossible.</p>
-<p>Join me next time where I tackle WebAssembly&rsquo;s problematic control flow.</p>
-<section class="footnotes" role="doc-endnotes">
-<hr>
-<ol>
-<li id="fn:1" role="doc-endnote">
-<p>Yes, I know that many register machines such as x86 output into one of the input registers, but that&rsquo;s still conceptually the same as taking separate arguments for input and output, just more limited. <a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:2" role="doc-endnote">
-<p>if you don&rsquo;t know what SSA form is you can see <a href="https://en.wikipedia.org/wiki/Static_single_assignment_form">the Wikipedia article on it</a> <a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:3" role="doc-endnote">
-<p>A <code>pick</code> operator duplicates the nth item of the stack to the top of the stack. Unfortunately, it&rsquo;s not available in WebAssembly. <a href="#fnref:3" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-<li id="fn:4" role="doc-endnote">
-<p>I believe that it had infinite registers and so it was possible to generate it in SSA form, but it had no liveness analysis. <a href="#fnref:4" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
-</li>
-</ol>
-</section>
-
-</div>
-
-<footer>
-	<p>© 2017-2018, all rights reserved.</a>
-</footer>
-</body>
-</html>
+</code></pre></div><div class="code-light"><pre><code>%0 = 1
+%1 = 2
+%2 = add %0, %1
+...
+</code></pre></div><p>Are <code>%0</code> and <code>%1</code> used after the addition? Without lookahead, you have no way of knowing. Even in SSA <a id="ft-ref-2-2" href="#ft-note-2-2"><sup>2</sup></a> register machines like LLVM IR (where each register is written to exactly once) the liveness of each register must be continuously recalculated. This means that you have overhead associated with compilation - knowing the liveness of variables is extremely important for generating efficient assembly, but instead of the liveness being calculated when creating the IR and stored as a part of it you have to recalculate this data every time.</p><p>If the IR is entirely in-memory this isn’t so bad, especially if your code is in SSA form, but it means that you have to do extra work for the same quality of code and it means that a streaming compiler (like FireFox’s Wasm baseline compiler) is unable to produce good code.</p><p>You can, of course, add liveness analysis metadata to the machine, but that liveness analysis is only useful if your code is in SSA form - if it’s not SSA form then the liveness is <em>extremely</em> coarse-grained.</p><p>Well, that’s where WebAssembly comes in. See, WebAssembly has these things called locals. Locals are mutable variables that live for the lifetime of a function. Since WebAssembly blocks can’t take arguments, they’re the only way for blocks to receive data from outside. This includes stuff like loop counters, the classic example for SSA-defeating mutable variables, but it also includes regular blocks. For example:</p><div class="code-dark"><pre><code data-lang="lisp">(<span style="color: #5ea1ff">func</span> (<span style="color: #5ea1ff">result</span> i32)
+  (<span style="color: #5ea1ff">add</span> (<span style="color: #5ea1ff">i32.const</span> 1) (<span style="color: #5ea1ff">i32.const</span> 2))
+  (<span style="color: #ffbd5e">block</span> (<span style="color: #5ea1ff">result</span> i32)
+    <span style="color: #7b8496">;</span><span style="color: #7b8496"> Can't read the result of the add above</span>
+  ))
+</code></pre></div><div class="code-light"><pre><code data-lang="lisp">(<span style="color: #0057d1">func</span> (<span style="color: #0057d1">result</span> i32)
+  (<span style="color: #0057d1">add</span> (<span style="color: #0057d1">i32.const</span> 1) (<span style="color: #0057d1">i32.const</span> 2))
+  (<span style="color: #d17c00">block</span> (<span style="color: #0057d1">result</span> i32)
+    <span style="color: #7b8496">;</span><span style="color: #7b8496"> Can't read the result of the add above</span>
+  ))
+</code></pre></div><p>You have to do this:</p><div class="code-dark"><pre><code data-lang="lisp">(<span style="color: #5ea1ff">func</span> (<span style="color: #5ea1ff">result</span> i32)
+  (<span style="color: #5ea1ff">local</span> i32)
+  (<span style="color: #5ea1ff">local.set</span> 0 (<span style="color: #5ea1ff">add</span> (<span style="color: #5ea1ff">i32.const</span> 1) (<span style="color: #5ea1ff">i32.const</span> 2)))
+  (<span style="color: #ffbd5e">block</span> (<span style="color: #5ea1ff">result</span> i32)
+    (<span style="color: #5ea1ff">local.get</span> 0)
+  ))
+</code></pre></div><div class="code-light"><pre><code data-lang="lisp">(<span style="color: #0057d1">func</span> (<span style="color: #0057d1">result</span> i32)
+  (<span style="color: #0057d1">local</span> i32)
+  (<span style="color: #0057d1">local.set</span> 0 (<span style="color: #0057d1">add</span> (<span style="color: #0057d1">i32.const</span> 1) (<span style="color: #0057d1">i32.const</span> 2)))
+  (<span style="color: #d17c00">block</span> (<span style="color: #0057d1">result</span> i32)
+    (<span style="color: #0057d1">local.get</span> 0)
+  ))
+</code></pre></div><p>This is a problem. Usually a stack machine can be trivially converted to SSA form with liveness analysis - an item on the stack is dead when it is used as the argument to an operator - no ifs, no buts. Even a <code>pick</code> operator <a id="ft-ref-2-3" href="#ft-note-2-3"><sup>3</sup></a> can be thought of in these terms as long as the argument to <code>pick</code> is a compile-time constant, although generally the SSA conversion of a stack machine that includes a <code>pick</code> instruction would be implemented using refcounting - meaning that reading a variable doesn’t involve creating an unnecessary new one. However, locals are a problem. They’re mutable, so you can’t trivially convert them to SSA, and they always live for the lifetime of the function.</p><p>This poses a problem for optimisation. SSA form is one of the most powerful optimisation tools. The fact that locals are mutable defeats that, and the fact that they’re global to the function defeats liveness analysis. For an example of why this is an issue, say you’re trying to compile WebAssembly into some native architecture. You’ll compile your code into one that uses some number of arguments in registers, but now unless you do your own liveness analysis on that function those registers are permanently marked “in use” by those arguments. Without extra analysis you don’t know when the last usage of that argument is, and so you can’t ever reuse the register used by that argument for something else. Even a function that never uses any of its arguments still can’t reuse the space used by those arguments for anything else.</p><p>This essentially makes WebAssembly a register machine without liveness analysis, but not only that, it’s a register machine that isn’t even in SSA form - both of the tools at our disposal to do optimisation are unavailable. In a true, optimising compiler we can recreate that information, but WebAssembly was already emitted by a compiler that generated that information once. There’s no technical reason why we should have to do that work again, it’s just a deficiency in the language. A compiler that has to act on a stream of WebAssembly has less ability to recreate this information and will end up generating significantly worse code for essentially no good reason.</p><h3 id="webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-why"><span class="section-link"><a href="#webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-why"><span>§</span></a></span> <span class="section-title">Why?</span> <span class="section-link-postfix"><a href="#webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-why">§</a></span></h3><p>The developers of the WebAssembly spec aren’t dumb. For the most part it’s an extremely well-designed specification. However, they are weighed down by WebAssembly’s legacy. WebAssembly started out not as a bytecode, but more like a simplified binary representation for asm.js. Essentially it was originally designed to be source code, like JavaScript. It would be a more-efficient representation thereof but it still wasn’t a proper virtual machine instruction set. Then, it became a register machine <a id="ft-ref-2-4" href="#ft-note-2-4"><sup>4</sup></a> , and only at the last minute did it become a stack machine. At that point, concepts like locals were quite entrenched in the spec. Not only that, but for the most part the WebAssembly specification team were flying blind. No streaming compiler had yet been built, hell, no compiler had yet been built. It wasn’t clear that having locals would be problematic - after all, C gets by just fine using local variables that the compiler constructs the SSA graph for.</p><p>It’s only by working on a streaming WebAssembly compiler for integration with <a href="https://github.com/CraneStation/wasmtime">Wasmtime</a> that I realised these issues, as well as more issues that I’ll get to in later articles in this series. Before then I considered WebAssembly’s design to be utterly rock-solid, and in fact I still strongly believe that most of the decisions made were the right ones. Although it has problems, it’s incredible how much the WebAssembly working group got right considering it was such relatively unknown territory at the time of the specification’s writing.</p><h3 id="webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-what-s-the-alternative"><span class="section-link"><a href="#webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-what-s-the-alternative"><span>§</span></a></span> <span class="section-title">What’s the alternative?</span> <span class="section-link-postfix"><a href="#webassembly-troubles-part-1-webassembly-is-not-a-stack-machine-what-s-the-alternative">§</a></span></h3><p>So currently locals represent both function arguments and local variables. There is <a href="https://github.com/WebAssembly/multi-value/blob/master/proposals/multi-value/Overview.md">a proposal to allow blocks to have arguments and both functions and blocks to return more than one value</a>. With this, it becomes possible to get rid of locals entirely. Loop counters are implemented by having the counter be given as an argument, and then when you jump to the header of the loop you must have the new value of the counter on the stack. This acts like a phi function but is much conceptually simpler. Since it’s impossible to get the address of locals in WebAssembly there’s no need for <code>alloca</code> in any form - unlike in LLVM, you don’t need to have locals at all. The only thing left is to implement function arguments by having the function start with its arguments on the stack and you no longer need locals at all.</p><p>This massively reduces the complexity of the WebAssembly specification and compilers for it without reducing the expressivity, and allows the compilers generating the WebAssembly to encode more of their knowledge about the original source into the WebAssembly itself. Although optimising compilers will probably not generate better code from this, they will become much simpler and easier to maintain, and streaming compilers will become significantly simpler and produce significantly better code.</p><p>Finally, not only is a stack machine like this automatically in SSA form, but it’s automatically in <em>strict</em> SSA form. This means that it is statically impossible to access undefined variables. In WebAssembly as it exists now, you have to zero locals when entering a function unless you can statically prove that the local is always set before it is accessed. Again, the compilers almost always have this information, and removing locals makes accessing undefined memory statically impossible.</p><p>Join me next time where I tackle WebAssembly’s problematic control flow.</p><section class="footnotes" role="doc-endnotes"><hr><ol><li id="ft-note-2-1"><p>Yes, I know that many register machines such as x86 output into one of the input registers, but that’s still conceptually the same as taking separate arguments for input and output, just more limited.</p><div class="ft-return-link"><a href="#ft-ref-2-1">↩︎</a></div></li><li id="ft-note-2-2"><p>if you don’t know what SSA form is you can see <a href="https://en.wikipedia.org/wiki/Static_single_assignment_form">the Wikipedia article on it</a></p><div class="ft-return-link"><a href="#ft-ref-2-2">↩︎</a></div></li><li id="ft-note-2-3"><p>A <code>pick</code> operator duplicates the nth item of the stack to the top of the stack. Unfortunately, it’s not available in WebAssembly.</p><div class="ft-return-link"><a href="#ft-ref-2-3">↩︎</a></div></li><li id="ft-note-2-4"><p>I believe that it had infinite registers and so it was possible to generate it in SSA form, but it had no liveness analysis.</p><div class="ft-return-link"><a href="#ft-ref-2-4">↩︎</a></div></li></ol></section></div></div><footer><a href="https://github.com/eira-fransham"><img src="/github-logo.svg"></a></footer><span></span></div></body></html>
