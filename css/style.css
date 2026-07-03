@@ -1,12 +1,11 @@
-@import url(https://fonts.googleapis.com/css?family=Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square);
-@import url(/css/drafting-mono.css);
+@import url(https://fonts.googleapis.com/css?family=Courier+Prime|Lato|Sanchez|Bevan|Cascadia+Mono|Nova+Square);
 
 /* Light theme by default */
 :root {
     --main-header-font: "Bevan", monospace;
     --secondary-header-font: "Sanchez", monospace;
     --body-font: "Lato", sans-serif;
-    --code-font: "Drafting", monospace;
+    --code-font: "Courier Prime", monospace;
     --default-inset: 11pt;
     --expanded-inset: 20pt;
     --title-inset: 28pt;
