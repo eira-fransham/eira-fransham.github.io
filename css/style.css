@@ -542,8 +542,8 @@ blockquote {
     padding: var(--default-inset) 20px;
 }
 
-blockquote p {
-    display: inline;
+blockquote p:last-of-type {
+    margin-bottom: 0;
 }
 
 .content {
