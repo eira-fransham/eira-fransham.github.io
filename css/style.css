@@ -320,7 +320,15 @@ footer img {
     height: 30px;
 }
 
-.footnotes li p {
+.footnotes li > p > p {
+    display:inline;
+}
+
+.footnotes li > p:not(:last-of-type) {
+    margin-bottom: 10pt;
+}
+
+.footnotes li > p:last-of-type{
     display: inline;
 }
 
